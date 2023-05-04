@@ -1,0 +1,13 @@
+{
+  "name": "yakuman",
+  "version": "1.0.0",
+  "main": "lib/index.js",
+  "repository": "https://github.com/Anillc/yakuman.git",
+  "author": "Anillc <void@anillc.cn>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^18.16.3",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.0.4"
+  }
+}
