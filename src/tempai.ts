@@ -1,5 +1,5 @@
 import type { Tile, TileType } from './index'
-import { Counts, addCounts, cartesian, cloneCounts, createEmptyCounts, group } from './utils'
+import { Counts, addCounts, cartesian, cloneCounts, createEmptyCounts } from './utils'
 
 interface TempaiType {
   type: TileType
@@ -135,7 +135,7 @@ function isolate(counts: Counts): [
   const blocks: Block[] = []
   for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
     const tiles = counts[type]
-    for (let i = 0; tiles.length; i++) {
+    for (let i = 0; i < tiles.length; i++) {
       if (tiles[i] >= 3) {
         let iso = true
         for (const j of [i - 2, i - 1, i + 1, i + 2]) {
@@ -144,55 +144,55 @@ function isolate(counts: Counts): [
             iso = false
             break
           }
-          if (iso) {
-            tiles[i] -= 3
-            blocks.push({
-              type: 'kotsu',
-              tileType: type,
-              tiles: [i + 1, i + 1, i + 1],
-            })
-          }
+        }
+        if (iso) {
+          tiles[i] -= 3
+          blocks.push({
+            type: 'kotsu',
+            tileType: type,
+            tiles: [i + 1, i + 1, i + 1],
+          })
         }
       }
       if (tiles[i] === 1 && tiles[i + 1] === 1 && tiles[i + 2] === 1) {
+        let iso = true
         for (const j of [i - 2, i - 1, i + 3, i + 4]) {
-          let iso = true
           if (j < 0 || j > 8) continue
           if (tiles[j] > 0) {
             iso = false
             break
           }
-          if (iso) {
-            tiles[i]--
-            tiles[i + 1]--
-            tiles[i + 2]--
-            blocks.push({
-              type: 'shuntsu',
-              tileType: type,
-              tiles: [i + 1, i + 2, i + 3],
-            })
-          }
+        }
+        if (iso) {
+          tiles[i]--
+          tiles[i + 1]--
+          tiles[i + 2]--
+          blocks.push({
+            type: 'shuntsu',
+            tileType: type,
+            tiles: [i + 1, i + 2, i + 3],
+          })
         }
       }
       if (tiles[i] === 1) {
+        let iso = true
         for (const j of [i - 2, i - 1, i + 1, i + 2]) {
-          let iso = true
           if (j < 0 || j > 8) continue
           if (tiles[j] > 0) {
             iso = false
             break
           }
-          if (iso) {
-            tiles[i]--
-            isolated[type][i]++
-          }
+        }
+        if (iso) {
+          tiles[i]--
+          isolated[type][i]++
         }
       }
     }
   }
   for (const type of ['kaze', 'sangen'] satisfies TileType[]) {
     const tiles = counts[type]
-    for (let i = 0; tiles.length; i++) {
+    for (let i = 0; i < tiles.length; i++) {
       if (tiles[i] >= 3) {
         tiles[i] -= 3
         blocks.push({
@@ -203,7 +203,7 @@ function isolate(counts: Counts): [
       }
       if (tiles[i] === 1) {
         tiles[i]--
-        isolated[i]++
+        isolated[type][i]++
       }
     }
   }
