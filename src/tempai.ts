@@ -221,6 +221,7 @@ function jantou(counts: Counts) {
     }
   }
   results.push(...mentsu(counts))
+  return results
 }
 
 // 计算面子

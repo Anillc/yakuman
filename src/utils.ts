@@ -32,3 +32,9 @@ export function group(tiles: Tile[]) {
 export function mapRecord<V, T>(record: Record<string, V>, fn: (key: string, value: V) => T) {
   return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, fn(key, value)]))
 }
+
+export function cartesian<T>(...array: T[][]) {
+  return array.reduce((acc, x) => {
+    return acc.flatMap(a => x.map(b => [...a, b]))
+  }, array.shift().map(x => [x]))
+}
