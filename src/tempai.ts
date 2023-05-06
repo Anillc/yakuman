@@ -431,3 +431,31 @@ function kanchan(tiles: number[], type: TileType, resurse: number): NumberDecomp
   }
   return results
 }
+
+export function minShanten(decomposed: Decomposed[]): [shanten: number, decomposed: Decomposed[]] {
+  return decomposed.reduce(([min, list], x) => {
+    const count = {
+      kotsu: 0,
+      shuntsu: 0,
+      ryammen: 0,
+      penchan: 0,
+      kanchan: 0,
+      toitsu: 0,
+    }
+    for (const block of x.blocks) {
+      count[block.type]++
+    }
+    let mentsu = count.kotsu + count.shuntsu
+    let tatsuBlocks = count.ryammen + count.penchan + count.kanchan
+    let tatsu = mentsu + tatsuBlocks > 4 ? 4 - mentsu : tatsuBlocks
+    let hasToitsu = mentsu + tatsuBlocks > 4 && count.toitsu > 0
+    let shanten = 8 - mentsu * 2 - tatsu - (hasToitsu ? 1 : 0)
+    if (shanten < min) {
+      return [shanten, [x]]
+    } else if (shanten === min) {
+      return [shanten, list.concat(x)]
+    } else {
+      return [shanten, list]
+    }
+  }, [Infinity, []] as [number, Decomposed[]])
+}
