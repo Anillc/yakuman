@@ -18,9 +18,17 @@ export function createEmptyCounts(): Counts {
   }
 }
 
+export function cloneCounts(count: Counts) {
+  return structuredClone(count)
+}
+
 export function group(tiles: Tile[]) {
   return tiles.reduce((acc, x) => {
     acc[x.type][x.num - 1]++
     return acc
   }, createEmptyCounts())
+}
+
+export function mapRecord<V, T>(record: Record<string, V>, fn: (key: string, value: V) => T) {
+  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, fn(key, value)]))
 }
