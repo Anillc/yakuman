@@ -1,13 +1,9 @@
-import type { Tile } from '.'
+import type { Tile, TileType } from '.'
 import { Block, Decomposed, NumberDecomposed } from './tempai'
 import uniqWith from 'lodash.uniqwith'
 
-export interface Counts {
-  man: number[],
-  so: number[],
-  pin: number[],
-  kaze: number[],
-  sangen: number[],
+export type Counts = {
+  [key in TileType]: number[]
 }
 
 export function createEmptyCounts(): Counts {
