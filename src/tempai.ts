@@ -1,5 +1,5 @@
 import type { Tile, TileType } from './index'
-import { Counts, cloneCounts, createEmptyCounts, group } from './utils'
+import { Counts, cartesian, cloneCounts, createEmptyCounts, group } from './utils'
 
 interface TempaiType {
   type: TileType
@@ -108,6 +108,12 @@ export interface Block {
 export interface Decomposed {
   blocks: Block[]
   rest: Counts
+}
+
+// 数牌
+export interface NumberDecomposed {
+  blocks: Block[]
+  rest: number[]
 }
 
 function decompose(counts: Counts) {
@@ -226,5 +232,59 @@ function jantou(counts: Counts) {
 
 // 计算面子
 function mentsu(counts: Counts): Decomposed[] {
+  counts = cloneCounts(counts)
+  const results: NumberDecomposed[][] = []
+  for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
+    const result: NumberDecomposed[] = []
+    const tiles = counts[type]
+    for (const { blocks: b1, rest } of [...kotsu(tiles), ...shuntsu(tiles)]) {
+      for (const { blocks: b2, rest: r2 } of tatsu(rest)) {
+        result.push({
+          blocks: b1.concat(b2),
+          rest: r2,
+        })
+      }
+    }
+    results.push(result)
+  }
+  const mps = cartesian(...results)
+
+  // 字牌
+  const tsuhai: Block[] = []
+  for (const type of ['kaze', 'sangen'] satisfies TileType[]) {
+    const tiles = counts[type]
+    for (let i = 0; i < tiles.length; i++) {
+      if (tiles[i] >= 2) {
+        tiles[i] -= 2
+        tsuhai.push({
+          type: 'tuitsu',
+          tileType: type,
+          tiles: [i + 1, i + 1],
+        })
+      }
+    }
+  }
+
+  return mps.map(mps => ({
+    blocks: [...mps[0].blocks, ...mps[1].blocks, ...mps[2].blocks, ...tsuhai],
+    rest: {
+      'man': mps[0].rest,
+      'so': mps[1].rest,
+      'pin': mps[2].rest,
+      'kaze': counts['kaze'],
+      'sangen': counts['sangen'],
+    },
+  }))
+}
+
+function kotsu(tiles: number[]): NumberDecomposed[] {
+  return null
+}
+
+function shuntsu(tiles: number[]): NumberDecomposed[] {
+  return null
+}
+
+function tatsu(tiles: number[]): NumberDecomposed[] {
   return null
 }
