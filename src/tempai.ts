@@ -1,5 +1,5 @@
 import type { Tile, TileType } from './index'
-import { Counts, addCounts, cartesian, cloneCounts, createEmptyCounts } from './utils'
+import { Counts, addCounts, cartesian, cloneCounts, createEmptyCounts, sortBlocks, uniqDecomposed, uniqNumberDecomposed } from './utils'
 
 interface TempaiType {
   type: TileType
@@ -116,13 +116,13 @@ export interface NumberDecomposed {
   rest: number[]
 }
 
-function decompose(counts: Counts): Decomposed[] {
+export function decompose(counts: Counts): Decomposed[] {
   const [blocks, isolated, rest] = isolate(counts)
   const decomposed = jantou(rest)
-  return decomposed.map(decomposed => ({
+  return uniqDecomposed(decomposed.map(decomposed => ({
     blocks: [...blocks, ...decomposed.blocks],
     rest: addCounts(isolated, decomposed.rest),
-  }))
+  })))
 }
 
 function isolate(counts: Counts): [
@@ -207,6 +207,7 @@ function isolate(counts: Counts): [
       }
     }
   }
+  sortBlocks(blocks)
   return [blocks, isolated, counts]
 }
 
@@ -231,6 +232,7 @@ function jantou(counts: Counts) {
       }
     }
   }
+  results.forEach(({ blocks }) => sortBlocks(blocks))
   results.push(...mentsu(counts))
   return results
 }
@@ -252,7 +254,8 @@ function mentsu(counts: Counts): Decomposed[] {
     }
     results.push(result)
   }
-  const mps = cartesian(...results)
+  results.forEach(decomposed => decomposed.forEach(({ blocks }) => sortBlocks(blocks)))
+  const mps = cartesian(...results.map(uniqNumberDecomposed))
 
   // 字牌
   const tsuhai: Block[] = []
@@ -271,7 +274,7 @@ function mentsu(counts: Counts): Decomposed[] {
   }
 
   return mps.map(mps => ({
-    blocks: [...mps[0].blocks, ...mps[1].blocks, ...mps[2].blocks, ...tsuhai],
+    blocks: sortBlocks([...mps[0].blocks, ...mps[1].blocks, ...mps[2].blocks, ...tsuhai]),
     rest: {
       'man': mps[0].rest,
       'so': mps[1].rest,
@@ -304,6 +307,7 @@ function kotsu(tiles: number[], type: TileType): NumberDecomposed[] {
   if (empty) {
     results.push({ blocks: [], rest: tiles })
   }
+  results.forEach(({ blocks }) => sortBlocks(blocks))
   return results
 }
 
@@ -334,6 +338,7 @@ function shuntsu(tiles: number[], type: TileType): NumberDecomposed[] {
       rest: tiles,
     })
   }
+  results.forEach(({ blocks }) => sortBlocks(blocks))
   return results
 }
 
@@ -370,6 +375,7 @@ function toitsu(tiles: number[], type: TileType, resurse: number): NumberDecompo
   if (empty) {
     results.push({ blocks: [], rest: tiles })
   }
+  results.forEach(({ blocks }) => sortBlocks(blocks))
   return results
 }
 
@@ -400,6 +406,7 @@ function ryammen(tiles: number[], type: TileType, resurse: number): NumberDecomp
   if (empty) {
     results.push({ blocks: [], rest: tiles })
   }
+  results.forEach(({ blocks }) => sortBlocks(blocks))
   return results
 }
 
@@ -429,11 +436,13 @@ function kanchan(tiles: number[], type: TileType, resurse: number): NumberDecomp
   if (empty) {
     results.push({ blocks: [], rest: tiles })
   }
+  results.forEach(({ blocks }) => sortBlocks(blocks))
   return results
 }
 
-export function minShanten(decomposed: Decomposed[]): [shanten: number, decomposed: Decomposed[]] {
-  return decomposed.reduce(([min, list], x) => {
+// naki: 鸣牌
+export function minShanten(decomposed: Decomposed[], naki: number): [shanten: number, decomposed: Decomposed[]] {
+  return decomposed.reduce(([min, list], x, i) => {
     const count = {
       kotsu: 0,
       shuntsu: 0,
@@ -445,8 +454,8 @@ export function minShanten(decomposed: Decomposed[]): [shanten: number, decompos
     for (const block of x.blocks) {
       count[block.type]++
     }
-    let mentsu = count.kotsu + count.shuntsu
-    let tatsuBlocks = count.ryammen + count.penchan + count.kanchan
+    let mentsu = count.kotsu + count.shuntsu + naki
+    let tatsuBlocks = count.ryammen + count.penchan + count.kanchan + count.toitsu
     let tatsu = mentsu + tatsuBlocks > 4 ? 4 - mentsu : tatsuBlocks
     let hasToitsu = mentsu + tatsuBlocks > 4 && count.toitsu > 0
     let shanten = 8 - mentsu * 2 - tatsu - (hasToitsu ? 1 : 0)
@@ -455,7 +464,7 @@ export function minShanten(decomposed: Decomposed[]): [shanten: number, decompos
     } else if (shanten === min) {
       return [shanten, list.concat(x)]
     } else {
-      return [shanten, list]
+      return [min, list]
     }
   }, [Infinity, []] as [number, Decomposed[]])
 }

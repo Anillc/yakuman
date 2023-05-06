@@ -6,8 +6,12 @@
   "author": "Anillc <void@anillc.cn>",
   "license": "MIT",
   "devDependencies": {
+    "@types/lodash.uniqwith": "^4.5.7",
     "@types/node": "^18.16.3",
     "ts-node": "^10.9.1",
     "typescript": "^5.0.4"
+  },
+  "dependencies": {
+    "lodash.uniqwith": "^4.5.0"
   }
 }
