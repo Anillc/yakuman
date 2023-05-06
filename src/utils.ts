@@ -29,6 +29,16 @@ export function group(tiles: Tile[]) {
   }, createEmptyCounts())
 }
 
+export function addCounts(a: Counts, b: Counts) {
+  const c = createEmptyCounts()
+  for (const [key, value] of Object.entries(a)) {
+    for (let i = 0; i < value.length; i++) {
+      c[key][i] = value[i] + b[key][i]
+    }
+  }
+  return c
+}
+
 export function mapRecord<V, T>(record: Record<string, V>, fn: (key: string, value: V) => T) {
   return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, fn(key, value)]))
 }

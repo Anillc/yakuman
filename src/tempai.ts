@@ -1,5 +1,5 @@
 import type { Tile, TileType } from './index'
-import { Counts, cartesian, cloneCounts, createEmptyCounts, group } from './utils'
+import { Counts, addCounts, cartesian, cloneCounts, createEmptyCounts, group } from './utils'
 
 interface TempaiType {
   type: TileType
@@ -98,7 +98,7 @@ interface Tempai {
 //   }
 // }
 
-export type BlockType = 'shuntsu' | 'kotsu' | 'tuitsu' | 'ryammen' | 'penchan' | 'kanchan'
+export type BlockType = 'shuntsu' | 'kotsu' | 'toitsu' | 'ryammen' | 'penchan' | 'kanchan'
 export interface Block {
   type: BlockType
   tileType: TileType
@@ -116,8 +116,13 @@ export interface NumberDecomposed {
   rest: number[]
 }
 
-function decompose(counts: Counts) {
+function decompose(counts: Counts): Decomposed[] {
   const [blocks, isolated, rest] = isolate(counts)
+  const decomposed = jantou(rest)
+  return decomposed.map(decomposed => ({
+    blocks: [...blocks, ...decomposed.blocks],
+    rest: addCounts(isolated, decomposed.rest),
+  }))
 }
 
 function isolate(counts: Counts): [
@@ -217,7 +222,7 @@ function jantou(counts: Counts) {
       for (const { blocks, rest } of mentsu(cloned)) {
         results.push({
           blocks: blocks.concat({
-            type: 'tuitsu',
+            type: 'toitsu',
             tileType: type as TileType,
             tiles: [i + 1, i + 1],
           }),
@@ -237,10 +242,10 @@ function mentsu(counts: Counts): Decomposed[] {
   for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
     const result: NumberDecomposed[] = []
     const tiles = counts[type]
-    for (const { blocks: b1, rest } of [...kotsu(tiles), ...shuntsu(tiles)]) {
-      for (const { blocks: b2, rest: r2 } of tatsu(rest)) {
+    for (const { blocks: b1, rest } of [...kotsu(tiles, type), ...shuntsu(tiles, type)]) {
+      for (const { blocks: b2, rest: r2 } of tatsu(rest, type, Math.max(0, 4 - b1.length))) {
         result.push({
-          blocks: b1.concat(b2),
+          blocks: [...b1, ...b2],
           rest: r2,
         })
       }
@@ -257,7 +262,7 @@ function mentsu(counts: Counts): Decomposed[] {
       if (tiles[i] >= 2) {
         tiles[i] -= 2
         tsuhai.push({
-          type: 'tuitsu',
+          type: 'toitsu',
           tileType: type,
           tiles: [i + 1, i + 1],
         })
@@ -277,14 +282,152 @@ function mentsu(counts: Counts): Decomposed[] {
   }))
 }
 
-function kotsu(tiles: number[]): NumberDecomposed[] {
-  return null
+function kotsu(tiles: number[], type: TileType): NumberDecomposed[] {
+  const results: NumberDecomposed[] = []
+  let empty = true
+  for (let i = 0; i < tiles.length; i++) {
+    if (tiles[i] < 3) continue
+    empty = false
+    const cloned = [...tiles]
+    cloned[i] -= 3
+    for (const { blocks, rest } of [...kotsu(cloned, type), ...shuntsu(cloned, type)]) {
+      results.push({
+        blocks: blocks.concat({
+          type: 'kotsu',
+          tileType: type,
+          tiles: [i + 1, i + 1, i + 1],
+        }),
+        rest,
+      })
+    }
+  }
+  if (empty) {
+    results.push({ blocks: [], rest: tiles })
+  }
+  return results
 }
 
-function shuntsu(tiles: number[]): NumberDecomposed[] {
-  return null
+function shuntsu(tiles: number[], type: TileType): NumberDecomposed[] {
+  const results: NumberDecomposed[] = []
+  let empty = true
+  for (let i = 0; i < tiles.length; i++) {
+    if (i + 2 > 8 || tiles[i] < 1 || tiles[i + 1] < 1 || tiles[i + 2] < 1) continue
+    empty = false
+    const cloned = [...tiles]
+    cloned[i]--
+    cloned[i + 1]--
+    cloned[i + 2]--
+    for (const { blocks, rest } of [...kotsu(cloned, type), ...shuntsu(cloned, type)]) {
+      results.push({
+        blocks: blocks.concat({
+          type: 'shuntsu',
+          tileType: type,
+          tiles: [i + 1, i + 2, i + 3],
+        }),
+        rest,
+      })
+    }
+  }
+  if (empty) {
+    results.push({
+      blocks: [],
+      rest: tiles,
+    })
+  }
+  return results
 }
 
-function tatsu(tiles: number[]): NumberDecomposed[] {
-  return null
+function tatsu(tiles: number[], type: TileType, resurse: number): NumberDecomposed[] {
+  return [
+    ...toitsu(tiles, type, resurse),
+    ...ryammen(tiles, type, resurse),
+    ...kanchan(tiles, type, resurse),
+  ]
+}
+
+function toitsu(tiles: number[], type: TileType, resurse: number): NumberDecomposed[] {
+  if (resurse === 0) {
+    return [{ blocks: [], rest: tiles }]
+  }
+  const results: NumberDecomposed[] = []
+  let empty = true
+  for (let i = 0; i < tiles.length; i++) {
+    if (tiles[i] < 2) continue
+    empty = false
+    const cloned = [...tiles]
+    cloned[i] -= 2
+    for (const { blocks, rest } of tatsu(cloned, type, resurse - 1)) {
+      results.push({
+        blocks: blocks.concat({
+          type: 'toitsu',
+          tileType: type,
+          tiles: [i + 1, i + 1],
+        }),
+        rest,
+      })
+    }
+  }
+  if (empty) {
+    results.push({ blocks: [], rest: tiles })
+  }
+  return results
+}
+
+// 两面和边张
+function ryammen(tiles: number[], type: TileType, resurse: number): NumberDecomposed[] {
+  if (resurse === 0) {
+    return [{ blocks: [], rest: tiles }]
+  }
+  const results: NumberDecomposed[] = []
+  let empty = true
+  for (let i = 0; i < tiles.length; i++) {
+    if (i + 1 > 8 || tiles[i] < 1 || tiles[i + 1] < 1) continue
+    empty = false
+    const cloned = [...tiles]
+    cloned[i]--
+    cloned[i + 1]--
+    for (const { blocks, rest } of tatsu(cloned, type, resurse - 1)) {
+      results.push({
+        blocks: blocks.concat({
+          type: i === 0 || i === 7 ? 'penchan' : 'ryammen',
+          tileType: type,
+          tiles: [i + 1, i + 2],
+        }),
+        rest,
+      })
+    }
+  }
+  if (empty) {
+    results.push({ blocks: [], rest: tiles })
+  }
+  return results
+}
+
+function kanchan(tiles: number[], type: TileType, resurse: number): NumberDecomposed[] {
+  if (resurse === 0) {
+    return [{ blocks: [], rest: tiles }]
+  }
+  const results: NumberDecomposed[] = []
+  let empty = true
+  for (let i = 0; i < tiles.length; i++) {
+    if (i + 2 > 8 || tiles[i] < 1 || tiles[i + 2] < 1) continue
+    empty = false
+    const cloned = [...tiles]
+    cloned[i]--
+    cloned[i + 2]--
+    for (const { blocks, rest } of tatsu(cloned, type, resurse - 1)) {
+      results.push({
+        blocks: blocks.concat({
+          type: 'kanchan',
+          tileType: type,
+          tiles: [i + 1, i + 3],
+        }),
+        rest,
+      })
+    }
+  }
+  if (empty) {
+    results.push({ blocks: [], rest: tiles })
+  }
+  return results
 }
