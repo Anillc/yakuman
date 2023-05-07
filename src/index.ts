@@ -283,7 +283,7 @@ export class Player {
     return this.chi.length + this.pon.length + this.minkan.length
   }
 
-  get chii() {
+  get chiTiles() {
     const current = this.mahjong.kiru
     if (['sangen', 'kaze'].includes(current.type)) {
       return []
@@ -310,7 +310,7 @@ export class Player {
     return chizai
   }
   // 碰材
-  get ponzai() {
+  get ponTiles() {
     const current = this.mahjong.kiru
     const ponzai: Tile[][] = []
     const same = this.tiles.filter((tile) => tile.equals(current))
@@ -321,11 +321,27 @@ export class Player {
     }
     return ponzai
   }
-  // 杠材
-  get kanzai() {
+  // 杠材 (明杠)
+  get minkanTiles() {
     const current = this.mahjong.kiru
     const same = this.tiles.filter((tile) => tile.equals(current))
     return same.length === 3 ? [same] : []
+  }
+  // 暗杠
+  get ankanTiles() {
+    const tiles = [...this.tiles]
+    const group: Tile[][] = []
+    while (tiles.length !== 0) {
+      const same: Tile[] = [tiles.shift()]
+      let found: Tile
+      do {
+        const index = tiles.findIndex(tile => tile.equals(same[0]))
+        found = index !== -1 ? tiles.splice(index, 1)[0] : null
+        if (found) same.push(found)
+      } while (found)
+      group.push(same)
+    }
+    return group.filter(same => same.length === 4)
   }
 }
 
