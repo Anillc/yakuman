@@ -2,6 +2,7 @@ import { chitoitsuShanten, kokushimusoShanten, normalShanten } from './tempai'
 import { Pai, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
+export const kazes: Kaze[] = ['ton', 'nan', 'sha', 'pei']
 
 export type TileType = 'pin' | 'so' | 'man' | 'kaze' | 'sangen'
 
@@ -112,19 +113,25 @@ export class Round {
     return [dora, uraDora]
   }
 
+  // 摸牌
+  mopai(): boolean {
+    if (this.rest === 0) return false
+    const kaze = shimocha(this.kaze)
+    const tile = this.haiyama.shift()
+    tile.from.kaze = kaze
+    this[kaze].tiles.push(tile)
+    this.kaze = kaze
+    return true
+  }
+
   // 打牌
   // 牌山没牌的时候返回 false
-  dahai(tile: Tile): boolean {
+  dahai(tile: Tile) {
     if (this.kaze === 'ton') this.jun++
     this.player.tiles.splice(this.player.tiles.indexOf(tile), 1)
     tile.from.jun = this.jun
     this.kiru = tile
     this.player.ho.push(tile)
-    if (this.rest === 0) return false
-    const kaze = shimocha(this.kaze)
-    this[kaze].tiles.push(this.haiyama.shift())
-    this.kaze = kaze
-    return true
   }
 
   // 吃、碰、明杠的 kaze 为上一次打牌的玩家
@@ -142,7 +149,10 @@ export class Round {
     this.player.ho.pop()
     tiles.push(this.kiru)
     player.chi.push(tiles)
-    player.tiles.push(this.haiyama.shift())
+
+    const mopai = this.haiyama.shift()
+    mopai.from.kaze = kaze
+    player.tiles.push(mopai)
     this.kaze = kaze
   }
 
@@ -160,7 +170,6 @@ export class Round {
       tiles,
       chakan: false,
     })
-    player.tiles.push(this.haiyama.shift())
     this.kaze = kaze
   }
 
@@ -175,7 +184,10 @@ export class Round {
     this.player.ho.pop()
     tiles.push(this.kiru)
     player.minkan.push(tiles)
-    player.tiles.push(this.haiyama.pop())
+
+    const mopai = this.haiyama.shift()
+    mopai.from.kaze = kaze
+    player.tiles.push(mopai)
     this.kaze = kaze
     this.kanCount++
   }
@@ -188,7 +200,10 @@ export class Round {
       this.player.tiles.splice(index, 1)
     }
     this.player.ankan.push(tiles)
-    this.player.tiles.push(this.haiyama.pop())
+
+    const mopai = this.haiyama.shift()
+    mopai.from.kaze = this.kaze
+    this.player.tiles.push(mopai)
     this.kanCount++
   }
 
@@ -200,7 +215,10 @@ export class Round {
         pon.chakan = true
       }
     }
-    this.player.tiles.push(this.haiyama.pop())
+
+    const mopai = this.haiyama.shift()
+    mopai.from.kaze = this.kaze
+    this.player.tiles.push(mopai)
     this.kanCount++
   }
 
