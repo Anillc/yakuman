@@ -1,6 +1,11 @@
-import type { Tile, TileType } from '.'
-import { Block, Decomposed, NumberDecomposed, Tempai } from './tempai'
+import { Tile, TileType } from '.'
+import { Block, Decomposed, NumberDecomposed } from './tempai'
 import uniqWith from 'lodash.uniqwith'
+
+export interface Pai {
+  type: TileType
+  num: number
+}
 
 export type Counts = {
   [key in TileType]: number[]
@@ -88,18 +93,26 @@ export function uniqNumberDecomposed(decomposed: NumberDecomposed[]) {
   })
 }
 
-export function compareTempai(a: Tempai, b: Tempai) {
+export function comparePai(a: Pai, b: Pai) {
   if (a.type !== b.type) return a.type > b.type ? 1 : -1
   if (a.num !== b.num) return a.num > b.num ? 1 : -1
   return 0
 }
 
-export function sortTempai(tempai: Tempai[]) {
-  return tempai.sort(compareTempai)
+export function sortPai(pai: Pai[]) {
+  return pai.sort(comparePai)
 }
 
-export function uniqTempai(tempai: Tempai[]) {
-  return uniqWith(tempai, (a, b) => {
-    return compareTempai(a, b) === 0
+export function uniqPai(pai: Pai[]) {
+  return uniqWith(pai, (a, b) => {
+    return comparePai(a, b) === 0
   })
+}
+
+export function toPai(tile: Tile): Pai {
+  return { type: tile.type, num: tile.num }
+}
+
+export function toPaiArray(tiles: Tile[]) {
+  return tiles.map(toPai)
 }

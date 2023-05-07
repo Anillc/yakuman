@@ -1,3 +1,5 @@
+import { chitoitsuShanten, kokushimusoShanten, normalShanten } from './tempai'
+import { Pai, group, toPaiArray, uniqPai } from './utils'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 
@@ -20,7 +22,7 @@ export class Tile {
     this.from = { kaze }
   }
 
-  equals(tile: Tile): boolean
+  equals(tile: Tile | Pai): boolean
   equals(type: TileType, num: number): boolean
   equals(...[arg1, arg2]: any[]) {
     if (typeof arg1 === 'string') {
@@ -168,7 +170,7 @@ export class Mahjong {
     this.kanCount++
   }
 
-  tileRest(tile: Tile) {
+  tileRest(kaze: Kaze, type: TileType, num: number) {
     let rest = 4
     const players = [this.ton, this.nan, this.sha, this.pei]
     for (const player of players) {
@@ -179,13 +181,16 @@ export class Mahjong {
         ...player.minkan.flat(),
         ...player.ankan.flat(),
       ]
-      for (const hai of tiles) {
-        if (hai.equals(tile)) rest--
+      for (const tile of tiles) {
+        if (tile.equals(type, num)) rest--
       }
     }
+    for (const tile of this[kaze].tiles) {
+      if (tile.equals(type, num)) rest--
+    }
     const [dorahyoji] = this.dorahyoji
-    for (const hai of dorahyoji) {
-      if (hai.equals(tile)) rest--
+    for (const tile of dorahyoji) {
+      if (tile.equals(type, num)) rest--
     }
     return rest
   }
@@ -210,7 +215,42 @@ export class Player {
 
   mahjong: Mahjong
 
-  get chizai() {
+  shanten: number
+  shantenPai: Pai[]
+
+  calcShanten13(tiles?: Tile[]): [number, Pai[]] {
+    tiles ||= this.tiles
+    const counts = group(tiles)
+    const shanten: [number, Pai[]][] = []
+    const naki = this.naki + this.ankan.length
+    if (naki === 0) {
+      shanten.push(chitoitsuShanten(counts))
+      shanten.push(kokushimusoShanten(counts))
+    }
+    shanten.push(normalShanten(counts, naki))
+    const result = shanten.reduce((acc, x) => {
+      if (acc[0] < x[0]) return acc
+      if (acc[0] > x[0]) return x
+      return [x[0], [...acc[1], ...x[1]]]
+    })
+    return [result[0], uniqPai(result[1])]
+  }
+
+  calcShanten14(): [Pai, number, Pai[]][] {
+    const pai = uniqPai(toPaiArray(this.tiles))
+    return pai.map(pai => {
+      const tiles = [...this.tiles]
+      tiles.splice(tiles.findIndex(tile => tile.equals(pai)), 1)
+      return [pai, ...this.calcShanten13(tiles)]
+    })
+  }
+
+  // 鸣牌数量
+  get naki() {
+    return this.chi.length + this.pon.length + this.minkan.length
+  }
+
+  get chii() {
     const current = this.mahjong.kiru
     if (['sangen', 'kaze'].includes(current.type)) {
       return []
@@ -254,10 +294,6 @@ export class Player {
     const same = this.tiles.filter((tile) => tile.equals(current))
     return same.length === 3 ? [same] : []
   }
-  // // 听牌
-  // get tempai(): Record<Tile, Tile[]> {
-
-  // }
 }
 
 // 下家
