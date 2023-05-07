@@ -1,7 +1,7 @@
-import type { Tile, TileType } from './index'
-import { Counts, addCounts, cartesian, cloneCounts, createEmptyCounts, sortBlocks, uniqDecomposed, uniqNumberDecomposed } from './utils'
+import type { TileType } from './index'
+import { Counts, addCounts, cartesian, cloneCounts, createEmptyCounts, sortBlocks, uniqDecomposed, uniqNumberDecomposed, uniqTempai } from './utils'
 
-interface Tempai {
+export interface Tempai {
   type: TileType
   num: number
 }
@@ -26,11 +26,11 @@ export function chitoitsuShanten(counts: Counts): [shanten: number, tempai: Temp
       }
     }
   }
-  return [shanten, tempai]
+  return [shanten, uniqTempai(tempai)]
 }
 
 // 国士无双
-export function kokushimusoShanten(counts: Counts): [shanten: number, tenpai:Tempai[]] {
+export function kokushimusoShanten(counts: Counts): [shanten: number, tempai: Tempai[]] {
   // 幺九牌
   const yaochu = [
     counts['man'][0], counts['man'][8],
@@ -59,7 +59,81 @@ export function kokushimusoShanten(counts: Counts): [shanten: number, tenpai:Tem
       }
     }
   }
-  return [shanten, tempi]
+  return [shanten, uniqTempai(tempi)]
+}
+
+export function shanten(counts: Counts, naki: number): [shanten: number, tempai: Tempai[]] {
+  const tempai: Tempai[] = []
+  const [shanten, decomposed] = minShanten(decompose(counts), naki)
+  for (const dec of decomposed) {
+    const {
+      shuntsu, kotsu, toitsu,
+      ryammen, penchan, kanchan,
+    } = dec.blocks.reduce((acc, x) => {
+      acc[x.type].push(x)
+      return acc
+    }, {
+      shuntsu: [], kotsu: [], toitsu: [],
+      ryammen: [], penchan: [], kanchan: [],
+    } as Record<BlockType, Block[]>)
+    const mentsuLength = shuntsu.length + kotsu.length
+    const tatsuLength = ryammen.length + penchan.length + kanchan.length
+
+    for (const rm of ryammen) {
+      tempai.push({ type: rm.tileType, num: rm.tiles[0] - 1 })
+      tempai.push({ type: rm.tileType, num: rm.tiles[1] + 1 })
+    }
+    for (const pc of penchan) {
+      const num = pc.tiles[0] === 1 ? pc.tiles[1] + 1 : pc.tiles[0] - 1
+      tempai.push({ type: pc.tileType, num })
+    }
+    for (const kc of kanchan) {
+      tempai.push({ type: kc.tileType, num: kc.tiles[0] + 1 })
+    }
+    // 分没有对子、一个对子和多个对子三种情况
+    function makeTatsu() {
+      for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
+        for (let i = 0; i < dec.rest[type].length; i++) {
+          if (dec.rest[type][i] === 0) continue
+          if (i - 2 < 0 || i + 2 > 8) continue
+          for (const tile of [i - 2, i - 1, i, i + 1, i + 2]) {
+            tempai.push({ type: type as TileType, num: tile + 1 })
+          }
+        }
+      }
+      for (const type of ['kaze', 'sangen'] satisfies TileType[]) {
+        for (let i = 0; i < dec.rest[type].length; i++) {
+          if (dec.rest[type][i] === 0) continue
+          tempai.push({ type: type as TileType, num: i + 1 })
+        }
+      }
+    }
+    if (toitsu.length === 0) {
+      if (mentsuLength + naki + tatsuLength < 4)  {
+        makeTatsu()
+      } else {
+        // 将单张做成对子
+        for (const [type, tiles] of Object.entries(dec.rest)) {
+          for (let i = 0; i < tiles.length; i++) {
+            if (tiles[i] === 0) continue
+            tempai.push({ type: type as TileType, num: i + 1 })
+          }
+        }
+      }
+    }
+    if ((toitsu.length === 1 && mentsuLength + naki + tatsuLength < 4)
+      || (toitsu.length >= 2 && mentsuLength + naki + tatsuLength < 5)) {
+      makeTatsu()
+      // 将对子做成刻子
+      for (const tt of toitsu) {
+        tempai.push({
+          type: tt.tileType,
+          num: tt.tiles[0],
+        })
+      }
+    }
+  }
+  return [shanten, uniqTempai(tempai)]
 }
 
 export type BlockType = 'shuntsu' | 'kotsu' | 'toitsu' | 'ryammen' | 'penchan' | 'kanchan'

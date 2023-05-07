@@ -1,5 +1,5 @@
 import type { Tile, TileType } from '.'
-import { Block, Decomposed, NumberDecomposed } from './tempai'
+import { Block, Decomposed, NumberDecomposed, Tempai } from './tempai'
 import uniqWith from 'lodash.uniqwith'
 
 export type Counts = {
@@ -85,5 +85,21 @@ export function uniqNumberDecomposed(decomposed: NumberDecomposed[]) {
       if (compareBlock(a.blocks[i], b.blocks[i]) !== 0) return false
     }
     return true
+  })
+}
+
+export function compareTempai(a: Tempai, b: Tempai) {
+  if (a.type !== b.type) return a.type > b.type ? 1 : -1
+  if (a.num !== b.num) return a.num > b.num ? 1 : -1
+  return 0
+}
+
+export function sortTempai(tempai: Tempai[]) {
+  return tempai.sort(compareTempai)
+}
+
+export function uniqTempai(tempai: Tempai[]) {
+  return uniqWith(tempai, (a, b) => {
+    return compareTempai(a, b) === 0
   })
 }
