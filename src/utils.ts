@@ -1,4 +1,4 @@
-import { Tile, TileType } from '.'
+import { Kaze, Tile, TileType } from './round'
 import { Block, Decomposed, NumberDecomposed } from './tempai'
 import uniqWith from 'lodash.uniqwith'
 
@@ -125,5 +125,19 @@ export function shuffle(tiles: Tile[]) {
   for (let i = 0; i < tiles.length - 1; i++) {
     const remove = random(0, tiles.length - i - 1)
     tiles.push(tiles.splice(remove, 1)[0])
+  }
+}
+
+// 下家
+export function shimocha(kaze: Kaze): Kaze {
+  switch (kaze) {
+    case 'ton':
+      return 'nan'
+    case 'nan':
+      return 'sha'
+    case 'sha':
+      return 'pei'
+    case 'pei':
+      return 'ton'
   }
 }

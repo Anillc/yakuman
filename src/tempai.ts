@@ -1,4 +1,4 @@
-import type { TileType } from './index'
+import type { TileType } from './round'
 import {
   Counts, Pai, addCounts, cartesian, cloneCounts, createEmptyCounts,
   sortBlocks, uniqDecomposed, uniqNumberDecomposed, uniqPai

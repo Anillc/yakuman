@@ -1,5 +1,5 @@
 import { chitoitsuShanten, kokushimusoShanten, normalShanten } from './tempai'
-import { Pai, group, shuffle, toPaiArray, uniqPai } from './utils'
+import { Pai, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 
@@ -31,7 +31,7 @@ export class Tile {
   }
 }
 
-export class Mahjong {
+export class Round {
   kanCount: number = 0
   haiyama: Tile[]
 
@@ -246,7 +246,7 @@ export class Player {
   riichi: boolean = false
 
   constructor(
-    public mahjong: Mahjong,
+    public round: Round,
     public kaze: Kaze,
     public tiles: Tile[],
   ) {}
@@ -284,7 +284,7 @@ export class Player {
   }
 
   get chiTiles() {
-    const current = this.mahjong.kiru
+    const current = this.round.kiru
     if (['sangen', 'kaze'].includes(current.type)) {
       return []
     }
@@ -311,7 +311,7 @@ export class Player {
   }
   // 碰材
   get ponTiles() {
-    const current = this.mahjong.kiru
+    const current = this.round.kiru
     const ponzai: Tile[][] = []
     const same = this.tiles.filter((tile) => tile.equals(current))
     if (same.length === 2) {
@@ -323,7 +323,7 @@ export class Player {
   }
   // 杠材 (明杠)
   get minkanTiles() {
-    const current = this.mahjong.kiru
+    const current = this.round.kiru
     const same = this.tiles.filter((tile) => tile.equals(current))
     return same.length === 3 ? [same] : []
   }
@@ -342,19 +342,5 @@ export class Player {
       group.push(same)
     }
     return group.filter(same => same.length === 4)
-  }
-}
-
-// 下家
-function shimocha(kaze: Kaze): Kaze {
-  switch (kaze) {
-    case 'ton':
-      return 'nan'
-    case 'nan':
-      return 'sha'
-    case 'sha':
-      return 'pei'
-    case 'pei':
-      return 'ton'
   }
 }
