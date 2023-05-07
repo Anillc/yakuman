@@ -116,3 +116,14 @@ export function toPai(tile: Tile): Pai {
 export function toPaiArray(tiles: Tile[]) {
   return tiles.map(toPai)
 }
+
+export function random(min: number, max: number) {
+  return Math.round(Math.random() * (max - min) + min)
+}
+
+export function shuffle(tiles: Tile[]) {
+  for (let i = 0; i < tiles.length - 1; i++) {
+    const remove = random(0, tiles.length - i - 1)
+    tiles.push(tiles.splice(remove, 1)[0])
+  }
+}

@@ -1,5 +1,5 @@
 import { chitoitsuShanten, kokushimusoShanten, normalShanten } from './tempai'
-import { Pai, group, toPaiArray, uniqPai } from './utils'
+import { Pai, group, shuffle, toPaiArray, uniqPai } from './utils'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 
@@ -10,17 +10,14 @@ export class Tile {
   from: {
     // 巡
     jun?: number
-    kaze: Kaze
-  }
+    kaze?: Kaze
+  } = {}
 
   constructor(
     public type: TileType,
     public num: number,
     public red: boolean,
-    kaze: Kaze,
-  ) {
-    this.from = { kaze }
-  }
+  ) {}
 
   equals(tile: Tile | Pai): boolean
   equals(type: TileType, num: number): boolean
@@ -35,23 +32,60 @@ export class Tile {
 }
 
 export class Mahjong {
-  // 场风
-  bakaze: Kaze
-  kanCount: number
+  kanCount: number = 0
   haiyama: Tile[]
 
   ton: Player
   nan: Player
   sha: Player
   pei: Player
-  kaze: Kaze
+  kaze: Kaze = 'ton'
 
   // 巡
-  jun: number
+  jun: number = 0
   // 上一张被切的牌
-  kiru: Tile
+  kiru: Tile = null
 
-  constructor () {}
+  constructor (
+    // 场风
+    public bakaze: Kaze,
+  ) {
+    const tiles: Tile[] = []
+    for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
+      for (let i = 0; i < 9; i++) {
+        if (i + 1 === 5) {
+          tiles.push(new Tile(type, i + 1, true))
+        } else {
+          tiles.push(new Tile(type, i + 1, false))
+        }
+        for (let j = 0; j < 3; j++) {
+          tiles.push(new Tile(type, i + 1, false))
+        }
+      }
+    }
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        tiles.push(new Tile('kaze', i + 1, false))
+      }
+    }
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 4; j++) {
+        tiles.push(new Tile('sangen', i + 1, false))
+      }
+    }
+    shuffle(tiles)
+    function setKaze(tiles: Tile[], kaze: Kaze) {
+      for (const tile of tiles) {
+        tile.from.kaze = kaze
+      }
+      return tiles
+    }
+    this.ton = new Player(this, 'ton', setKaze(tiles.splice(0, 14), 'ton'))
+    this.nan = new Player(this, 'nan', setKaze(tiles.splice(0, 13), 'nan'))
+    this.sha = new Player(this, 'sha', setKaze(tiles.splice(0, 13), 'sha'))
+    this.pei = new Player(this, 'pei', setKaze(tiles.splice(0, 13), 'pei'))
+    this.haiyama = tiles
+  }
 
   get player(): Player {
     return this[this.kaze]
@@ -203,20 +237,19 @@ interface Pon {
 }
 
 export class Player {
-  kaze: Kaze
-  tiles: Tile[]
-  chi: Tile[][]
-  pon: Pon[]
-  minkan: Tile[][]
-  ankan: Tile[][]
+  chi: Tile[][]    = []
+  pon: Pon[]       = []
+  minkan: Tile[][] = []
+  ankan: Tile[][]  = []
   // 牌河
-  ho: Tile[]
-  riichi: boolean
+  ho: Tile[] = []
+  riichi: boolean = false
 
-  mahjong: Mahjong
-
-  shanten: number
-  shantenPai: Pai[]
+  constructor(
+    public mahjong: Mahjong,
+    public kaze: Kaze,
+    public tiles: Tile[],
+  ) {}
 
   calcShanten13(tiles?: Tile[]): [number, Pai[]] {
     tiles ||= this.tiles
@@ -258,20 +291,20 @@ export class Player {
     const chizai: Tile[][] = []
     // 45<6>
     if (current.num - 2 >= 1) {
-      const first = this.tiles.filter((tile) => tile.num === current.num - 2)
-      const second = this.tiles.filter((tile) => tile.num === current.num - 1)
+      const first = this.tiles.filter((tile) => tile.equals(current.type, current.num - 2))
+      const second = this.tiles.filter((tile) => tile.equals(current.type, current.num - 1))
       first.forEach((first) => second.forEach((second) => chizai.push([first, second])))
     }
     // 4<5>6
     if (current.num - 1 >=1 && current.num + 1 <= 9) {
-      const first = this.tiles.filter((tile) => tile.num === current.num - 1)
-      const third = this.tiles.filter((tile) => tile.num === current.num + 1)
+      const first = this.tiles.filter((tile) => tile.equals(current.type, current.num - 1))
+      const third = this.tiles.filter((tile) => tile.equals(current.type, current.num + 1))
       first.forEach((first) => third.forEach((third) => chizai.push([first, third])))
     }
     // <4>56
     if (current.num + 2 >= 1) {
-      const second = this.tiles.filter((tile) => tile.num === current.num + 1)
-      const third = this.tiles.filter((tile) => tile.num === current.num + 2)
+      const second = this.tiles.filter((tile) => tile.equals(current.type, current.num + 1))
+      const third = this.tiles.filter((tile) => tile.equals(current.type, current.num + 2))
       second.forEach((second) => third.forEach((third) => chizai.push([second, third])))
     }
     return chizai
@@ -298,7 +331,7 @@ export class Player {
 
 // 下家
 function shimocha(kaze: Kaze): Kaze {
-  switch (this.kaze) {
+  switch (kaze) {
     case 'ton':
       return 'nan'
     case 'nan':
