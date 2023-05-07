@@ -5,11 +5,12 @@ export interface MahjongContext {
   index: number
   player: Player
   round: Round
-  buttons: ('chi' | 'pon' | 'kan' | 'riichi' | 'ryuukyoku')[]
+  buttons: Set<'chi' | 'pon' | 'kan' | 'riichi' | 'ryuukyoku'>
   chi?: Tile[][]
   pon?: Tile[][]
   minkan?: Tile[][]
   ankan?: Tile[][]
+  chakan?: Tile[]
 }
 
 export class Mahjong {
@@ -29,7 +30,7 @@ export class Mahjong {
             index: this.index(kaze),
             player: round[kaze],
             round,
-            buttons: [],
+            buttons: new Set(),
           }
         }
         const ctxs: Record<Kaze, MahjongContext> = {
@@ -42,23 +43,23 @@ export class Mahjong {
           if (kaze === round.kiru.from.kaze) continue
           const pon = round[kaze].ponTiles
           if (pon.length !== 0) {
-            ctxs[kaze].buttons.push('pon')
+            ctxs[kaze].buttons.add('pon')
             ctxs[kaze].pon = pon
           }
           const minkan = round[kaze].minkanTiles
           if (minkan.length !== 0) {
-            ctxs[kaze].buttons.push('kan')
+            ctxs[kaze].buttons.add('kan')
             ctxs[kaze].minkan = minkan
           }
         }
         const chiKaze = shimocha(round.kaze)
         const chi = round[chiKaze].chiTiles
         if (chi.length !== 0) {
-          ctxs[chiKaze].buttons.push('chi')
+          ctxs[chiKaze].buttons.add('chi')
           ctxs[chiKaze].chi = chi
         }
         // TODO: 荣和
-        const filtered = Object.values(ctxs).filter(ctx => ctx.buttons.length > 0)
+        const filtered = Object.values(ctxs).filter(ctx => ctx.buttons.size > 0)
         this.callback(filtered, next)
         return
       }
@@ -69,12 +70,17 @@ export class Mahjong {
         index: this.index(round.kaze),
         player: round.player,
         round,
-        buttons: [],
+        buttons: new Set(),
       }
       const ankan = round.player.ankanTiles
       if (ankan.length !== 0) {
-        ctx.buttons.push('kan')
+        ctx.buttons.add('kan')
         ctx.ankan = ankan
+      }
+      const chakan = round.player.chakanTiles
+      if (chakan.length !== 0) {
+        ctx.buttons.add('kan')
+        ctx.chakan = chakan
       }
       // TODO: 自摸
       this.callback([ctx], next)

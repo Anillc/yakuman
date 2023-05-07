@@ -339,7 +339,7 @@ export class Player {
     }
     return ponzai
   }
-  // 杠材 (明杠)
+  // 明杠
   get minkanTiles() {
     const current = this.round.kiru
     const same = this.tiles.filter((tile) => tile.equals(current))
@@ -360,5 +360,14 @@ export class Player {
       group.push(same)
     }
     return group.filter(same => same.length === 4)
+  }
+  // 加杠
+  get chakanTiles() {
+    const result: Tile[] = []
+    for (const pon of this.pon) {
+      const tile = this.tiles.find(tile => tile.equals(pon.tiles[0]))
+      if (tile) result.push(tile)
+    }
+    return result
   }
 }
