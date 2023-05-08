@@ -5,35 +5,35 @@ import { group } from './utils'
 export interface Yaku {
   // 一番
   // 立直 (门前清)
-  riichi: boolean
+  riichi: 1
   // 断幺九
-  tanyao: boolean
+  tanyao: 1
   // 门前清自摸 (门前清)
-  tsumo: boolean
+  tsumo: 1
   // 场风
-  'field-wind': boolean
+  bakaze: 1
   // 自风
-  'seat-wind': boolean
+  jikaze: 1
   // 白
-  white: boolean
+  white: 1
   // 发
-  green: boolean
+  green: 1
   // 中
-  red: boolean
+  red: 1
   // 平和 (门前清)
-  pinfu: boolean
+  pinfu: 1
   // 一杯口 (门前清)
-  iipeko: boolean
+  iipeko: 1
   // 抢杠
-  chankan: boolean
+  chankan: 1
   // 岭上
-  rinshan: boolean
+  rinshan: 1
   // 海底
-  haitei: boolean
+  haitei: 1
   // 河底
-  hotei: boolean
+  hotei: 1
   // 一发
-  ippatsu: boolean
+  ippatsu: 1
   // 宝牌
   dora: number
   // 红宝牌
@@ -43,74 +43,74 @@ export interface Yaku {
 
   // 两番
   // 双立直 (门前清)
-  doubleriichi: boolean
+  doubleriichi: 2
   // 三色同刻
-  sanshokudoko: boolean
+  sanshokudoko: 2
   // 三杠子
-  sankantsu: boolean
+  sankantsu: 2
   // 对对和
-  toitoi: boolean
+  toitoi: 2
   // 三暗刻
-  sananko: boolean
+  sananko: 2
   // 小三元
-  shosangen: boolean
+  shosangen: 2
   // 混老头
-  honroto: boolean
+  honroto: 2
   // 七对子 (门前清)
-  chitoitsu: boolean
+  chitoitsu: 2
   // 混全带幺九 (副露减一番)
-  chanta: boolean
+  chanta: 1 | 2
   // 一气通贯 (副露减一番)
-  ittsu: boolean
+  ittsu: 1 | 2
   // 三色同顺 (副露减一番)
-  sanshokudojun: boolean
+  sanshokudojun: 1 | 2
 
 
   // 三番
   // 两杯口 (门前清)
-  ryampeko: boolean
+  ryampeko: 3
   // 纯全带幺九 (副露减一番)
-  junchan: boolean
+  junchan: 2 | 3
   // 混一色 (副露减一番)
-  honitsu: boolean
+  honitsu: 2 | 3
 
   // 六番
   // 清一色 (副露减一番)
-  chinitsu: boolean
+  chinitsu: 5 | 6
 
   // 役满
   // 天和 (庄家限定)
-  tenho: boolean
+  tenho: 13
   // 地和 (子家限定)
-  chiho: boolean
+  chiho: 13
   // 大三元
-  daisangen: boolean
+  daisangen: 13
   // 四暗刻 (门前清)
-  suanko: boolean
+  suanko: 13
   // 字一色
-  tsuiso: boolean
+  tsuiso: 13
   // 绿一色
-  ryuiso: boolean
+  ryuiso: 13
   // 清老头
-  chinroto: boolean
+  chinroto: 13
   // 国士无双 (门前清)
-  kokushimusou: boolean
+  kokushimusou: 13
   // 小四喜
-  shosushi: boolean
+  shosushi: 13
   // 四杠子
-  sukantsu: boolean
+  sukantsu: 13
   // 九莲宝灯 (门前清)
-  kyuurempoto: boolean
+  kyuurempoto: 13
 
   // 两倍役满
   // 四暗刻单骑 (门前清)
-  suankotanki: boolean
+  suankotanki: 26
   // 国士无双十三面 (门前清)
-  kokushimusou13: boolean
+  kokushimusou13: 26
   // 纯正九莲宝灯 (门前清)
-  junseikyuurempoto: boolean
+  junseikyuurempoto: 26
   // 大四喜
-  daisushi: boolean
+  daisushi: 26
 }
 
 export function yaku(tiles: Tile[], naki: number) {

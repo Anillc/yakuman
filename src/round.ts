@@ -1,4 +1,4 @@
-import { Decomposed, shanten } from './tempai'
+import { Decomposed, decompose, shanten } from './tempai'
 import { Pai, comparePai, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
@@ -144,14 +144,27 @@ export class Round {
 
   // 打牌
   dahai(tile: Tile, riichi: boolean) {
+    // TODO: fix this
     if (this.kaze === 'ton') this.jun++
     this.player.tiles.splice(this.player.tiles.indexOf(tile), 1)
     tile.from.jun = this.jun
     this.kiru = tile
     this.player.ho.push(tile)
+    if (this.player.riichi) {
+      this.player.riichi.iipatsu = false
+    }
     if (this.player.tempai14) {
       // TODO: 计算振听
       this.player.tempai13 = this.player.tempai14.find(([tempai]) => tile.equals(tempai))?.[1]
+      if (riichi) {
+        if (!this.player.tempai13 || this.player.naki !== 0) {
+          throw new Error('unreachable')
+        }
+        this.player.riichi = {
+          iipatsu: true,
+          decomposed: decompose(group(this.player.tiles)),
+        }
+      }
     } else {
       this.player.tempai13 = null
     }
@@ -174,6 +187,7 @@ export class Round {
     tiles.push(this.kiru)
     player.chi.push(tiles)
     this.mopai(kaze)
+    this.removeIppatsu()
   }
 
   pon(kaze: Kaze, tiles: Tile[]) {
@@ -191,6 +205,7 @@ export class Round {
       chakan: false,
     })
     this.kaze = kaze
+    this.removeIppatsu()
   }
 
   minkan(kaze: Kaze, tiles: Tile[]) {
@@ -207,6 +222,7 @@ export class Round {
 
     this.mopai(kaze)
     this.kanCount++
+    this.removeIppatsu()
   }
 
   ankan(tiles: Tile[]) {
@@ -220,6 +236,7 @@ export class Round {
 
     this.mopai(this.kaze)
     this.kanCount++
+    this.removeIppatsu()
   }
 
   chakan(tile: Tile) {
@@ -233,6 +250,15 @@ export class Round {
 
     this.mopai(this.kaze)
     this.kanCount++
+    this.removeIppatsu()
+  }
+
+  removeIppatsu() {
+    for (const kaze of kazes) {
+      if (this[kaze].riichi) {
+        this[kaze].riichi.iipatsu = false
+      }
+    }
   }
 
   tileRest(kaze: Kaze, type: TileType, num: number) {
@@ -284,7 +310,9 @@ export class Round {
         }
       }
       if (this.player.tempai14.length !== 0) {
-        if (this.player.naki === 0) action.types.add('riichi')
+        if (this.player.naki === 0 && this.rest >= 4){
+          action.types.add('riichi')
+        }
         // TODO: 检查是否是门前清自摸或有其他役
         for (const [kiru, tp] of this.player.tempai14) {
           if (tp.find(pai => comparePai(kiru, pai) === 0)) {
@@ -341,7 +369,7 @@ interface Pon {
 
 export interface Riichi {
   iipatsu: boolean
-  decomposed?: Decomposed[]
+  decomposed: Decomposed[]
 }
 
 export class Player {
