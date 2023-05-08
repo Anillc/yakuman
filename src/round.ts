@@ -1,5 +1,5 @@
-import { shanten } from './tempai'
-import { Pai, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
+import { Decomposed, shanten } from './tempai'
+import { Pai, comparePai, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 export const kazes: Kaze[] = ['ton', 'nan', 'sha', 'pei']
@@ -30,6 +30,18 @@ export class Tile {
       return arg1.type === this.type && arg1.num === this.num
     }
   }
+}
+
+export type ActionType = 
+  | 'chi' | 'pon' | 'kan' | 'riichi' | 'ryuukyoku'
+  | 'tsumo' | 'ron' | 'dapai' | 'cancel'
+export interface Action {
+  types: Set<ActionType>
+  chiTiles?:    Tile[][]
+  ponTiles?:    Tile[][]
+  minkanTiles?: Tile[][]
+  ankanTiles?:  Tile[][]
+  chakanTiles?: Tile[]
 }
 
 export class Round {
@@ -114,22 +126,36 @@ export class Round {
   }
 
   // 如果没有提供 kaze 参数，则切换到下家并摸牌
-  mopai(kaze?: Kaze) {
+  // 返回 true 则为听牌
+  mopai(kaze?: Kaze): boolean {
     kaze ||= shimocha(this.kaze)
     const tile = this.haiyama.shift()
     tile.from.kaze = kaze
     this[kaze].tiles.push(tile)
     this.kaze = kaze
+    const shanten = this.player.calcShanten14()
+    const tempai = shanten.filter(([, shanten]) => shanten === 0)
+    if (tempai.length !== 0) {
+      this.player.tempai14 = tempai.map(tempai => [tempai[0], tempai[2]])
+      return true
+    }
+    return false
   }
 
   // 打牌
-  // 牌山没牌的时候返回 false
-  dahai(tile: Tile) {
+  dahai(tile: Tile, riichi: boolean) {
     if (this.kaze === 'ton') this.jun++
     this.player.tiles.splice(this.player.tiles.indexOf(tile), 1)
     tile.from.jun = this.jun
     this.kiru = tile
     this.player.ho.push(tile)
+    if (this.player.tempai14) {
+      // TODO: 计算振听
+      this.player.tempai13 = this.player.tempai14.find(([tempai]) => tile.equals(tempai))?.[1]
+    } else {
+      this.player.tempai13 = null
+    }
+    this.player.tempai14 = null
   }
 
   // 吃、碰、明杠的 kaze 为上一次打牌的玩家
@@ -233,12 +259,89 @@ export class Round {
     }
     return rest
   }
+
+  // this.kiru.from.kaze === this.kaze => 自家刚打完牌
+  // this.kiru.from.kaze !== this.kaze => 等待自家打牌
+  // 返回 null 则为不需要操作
+  action(kaze: Kaze): Action {
+    // 是否已经摸牌
+    // TODO: 九种九牌
+    const mopai = this.kiru.from.kaze !== this.kaze
+    if (mopai) {
+      if (kaze !== this.kaze) return null
+      const action: Action = { types: new Set() }
+      // 最后一张牌的时候没有杠
+      if (this.rest !== 0) {
+        const ankan = this.player.ankanTiles
+        if (ankan.length !== 0) {
+          action.types.add('kan')
+          action.ankanTiles = ankan
+        }
+        const chakan = this.player.chakanTiles
+        if (chakan.length !== 0) {
+          action.types.add('kan')
+          action.chakanTiles = chakan
+        }
+      }
+      if (this.player.tempai14.length !== 0) {
+        if (this.player.naki === 0) action.types.add('riichi')
+        // TODO: 检查是否是门前清自摸或有其他役
+        for (const [kiru, tp] of this.player.tempai14) {
+          if (tp.find(pai => comparePai(kiru, pai) === 0)) {
+            action.types.add('tsumo')
+            break
+          }
+        }
+      }
+      action.types.add('dapai')
+      return action
+    } else {
+      // 刚打出牌
+      if (kaze === this.kaze) return null
+      const action: Action = { types: new Set() }
+      const tempai = this[kaze].tempai13
+      if (tempai && tempai.find(pai => this.kiru.equals(pai))) {
+        // TODO: 检查役、同巡振听
+        action.types.add('ron')
+      }
+      if (this.rest !== 0) {
+        const pon = this[kaze].ponTiles
+        if (pon.length !== 0) {
+          action.types.add('pon')
+          action.ponTiles = pon
+        }
+        const minkan = this[kaze].minkanTiles
+        if (minkan.length !== 0) {
+          action.types.add('kan')
+          action.minkanTiles = minkan
+        }
+        if (kaze === shimocha(this.kaze)) {
+          const chi = this[kaze].chiTiles
+          if (chi.length !== 0) {
+            action.types.add('chi')
+            action.chiTiles = chi
+          }
+        }
+      }
+      if (action.types.size === 0) {
+        return null
+      } else {
+        action.types.add('cancel')
+        return action
+      }
+    }
+  }
 }
 
 interface Pon {
   tiles: Tile[]
   // 加杠
   chakan: boolean
+}
+
+export interface Riichi {
+  iipatsu: boolean
+  decomposed?: Decomposed[]
 }
 
 export class Player {
@@ -248,10 +351,12 @@ export class Player {
   ankan: Tile[][]  = []
   // 牌河
   ho: Tile[] = []
-  riichi: boolean = false
+  riichi: Riichi
 
-  // 打出牌时设置
-  tempai: Pai[]
+  // 打牌时设置
+  tempai13: Pai[]
+  // 摸牌时设置，打牌时清除
+  tempai14: [Pai, Pai[]][]
 
   constructor(
     public round: Round,

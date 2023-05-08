@@ -9,7 +9,7 @@ export interface Shanten {
 }
 
 export function shanten(counts: Counts, naki: number): [number, Pai[]] {
-  const shanten: [number, Pai[]][] = []
+  const shanten: ([number, Pai[]] | [number, Pai[], Decomposed[]])[] = []
   if (naki === 0) {
     shanten.push(chitoitsuShanten(counts))
     shanten.push(kokushimusouShanten(counts))
@@ -18,7 +18,7 @@ export function shanten(counts: Counts, naki: number): [number, Pai[]] {
   const result = shanten.reduce((acc, x) => {
     if (acc[0] < x[0]) return acc
     if (acc[0] > x[0]) return x
-    return [x[0], [...acc[1], ...x[1]]]
+    return [x[0], [...acc[1], ...x[1]], acc[2] || x[2]]
   })
   return [result[0], uniqPai(result[1])]
 }
@@ -79,7 +79,7 @@ export function kokushimusouShanten(counts: Counts): [shanten: number, shantenPa
   return [shanten, uniqPai(tempi)]
 }
 
-export function normalShanten(counts: Counts, naki: number): [shanten: number, shantenPai: Pai[]] {
+export function normalShanten(counts: Counts, naki: number): [shanten: number, shantenPai: Pai[], decomposed: Decomposed[]] {
   const shantenPai: Pai[] = []
   const [shanten, decomposed] = minShanten(decompose(counts), naki)
   for (const dec of decomposed) {
@@ -150,7 +150,7 @@ export function normalShanten(counts: Counts, naki: number): [shanten: number, s
       }
     }
   }
-  return [shanten, uniqPai(shantenPai)]
+  return [shanten, uniqPai(shantenPai), decomposed]
 }
 
 export type BlockType = 'shuntsu' | 'kotsu' | 'toitsu' | 'ryammen' | 'penchan' | 'kanchan'

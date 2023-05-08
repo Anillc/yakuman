@@ -1,17 +1,15 @@
-import { Kaze, Player, Round, Tile, kazes } from './round'
-import { Pai, comparePai, shimocha } from './utils'
+import { Action, ActionType, Kaze, Player, Round, Tile, kazes } from './round'
+import { shimocha } from './utils'
 
-export type Buttons = 'chi' | 'pon' | 'kan' | 'riichi' | 'ryuukyoku' | 'riichi' | 'tsumo' | 'ron'
 
 // TODO: 流局
-export class MahjongContext {
-  buttons = new Set<Buttons>()
-  chiTiles?:    Tile[][]
-  ponTiles?:    Tile[][]
+export class MahjongContext implements Action {
+  types: Set<ActionType>
+  chiTiles?: Tile[][]
+  ponTiles?: Tile[][]
   minkanTiles?: Tile[][]
-  ankanTiles?:  Tile[][]
+  ankanTiles?: Tile[][]
   chakanTiles?: Tile[]
-  tempai?: [Pai, Pai[]][]
 
   round: Round
 
@@ -19,141 +17,48 @@ export class MahjongContext {
     public mahjong: Mahjong,
     public index: number,
     public player: Player,
-    public callback: (ctxs: MahjongContext[]) => void,
+    action: Action,
   ) {
     this.round = mahjong.round
+    Object.assign(this, action)
   }
 
-  dahai(tile: Tile) {
-    this.round.dahai(tile)
-    if (this.tempai) {
-      this.player.tempai = this.tempai.find(([tempai]) => tile.equals(tempai))?.[1]
-    } else {
-      this.player.tempai = null
-    }
-    this.naki()
+  dahai(tile: Tile, riichi?: boolean) {
+    this.round.dahai(tile, riichi)
+    this.mahjong.naki()
   }
 
   // 吃、杠会摸牌，则不需要再调用 mopai
   chi(tiles: Tile[]) {
     this.round.chi(tiles)
-    this.next()
+    this.mahjong.next()
   }
 
-  // 碰完必须再调用打牌
   pon(tiles: Tile[]) {
     this.round.pon(this.player.kaze, tiles)
+    this.mahjong.next()
   }
 
   minkan(tiles: Tile[]) {
     this.round.minkan(this.player.kaze, tiles)
-    this.check()
+    this.mahjong.next()
   }
 
   ankan(tiles: Tile[]) {
     // TODO: 国士无双
     this.round.ankan(tiles)
-    this.check()
+    this.mahjong.next()
   }
 
   chakan(tile: Tile) {
     this.round.chakan(tile)
-    this.check()
+    this.mahjong.next()
   }
 
   // 取消吃、碰、杠
+  // 几家都取消后才调用 cancel
   cancel() {
-    // TODO: 抢杠取消的时候应该另外处理
-    this.round.mopai()
-    this.next()
-  }
-
-  private clear() {
-    this.buttons = new Set()
-    this.chiTiles = null
-    this.ponTiles = null
-    this.minkanTiles = null
-    this.ankanTiles = null
-    this.chakanTiles = null
-    this.tempai = null
-  }
-
-  // 其他家的按钮
-  private naki() {
-    const { mahjong, round, callback } = this
-    const ctxs: Record<Kaze, MahjongContext> = {
-      ton: new MahjongContext(mahjong, mahjong.index('ton'), round['ton'], callback),
-      nan: new MahjongContext(mahjong, mahjong.index('nan'), round['nan'], callback),
-      sha: new MahjongContext(mahjong, mahjong.index('sha'), round['sha'], callback),
-      pei: new MahjongContext(mahjong, mahjong.index('pei'), round['pei'], callback),
-    }
-    for (const kaze of ['ton', 'nan', 'sha', 'pei'] satisfies Kaze[]) {
-      if (kaze === round.kiru.from.kaze) continue
-      const pon = round[kaze].ponTiles
-      if (pon.length !== 0) {
-        ctxs[kaze].buttons.add('pon')
-        ctxs[kaze].ponTiles = pon
-      }
-      const minkan = round[kaze].minkanTiles
-      if (minkan.length !== 0) {
-        ctxs[kaze].buttons.add('kan')
-        ctxs[kaze].minkanTiles = minkan
-      }
-      const tempai = round[kaze].tempai
-      if (tempai && tempai.find(pai => round.kiru.equals(pai))) {
-        // TODO: 检查役
-        ctxs[kaze].buttons.add('ron')
-      }
-    }
-    const chiKaze = shimocha(round.kaze)
-    const chi = round[chiKaze].chiTiles
-    if (chi.length !== 0) {
-      ctxs[chiKaze].buttons.add('chi')
-      ctxs[chiKaze].chiTiles = chi
-    }
-    const filtered = Object.values(ctxs).filter(ctx => ctx.buttons.size > 0)
-    if (filtered.length === 0) {
-      this.round.mopai()
-      this.next()
-    } else {
-      this.callback(filtered)
-    }
-  }
-
-  // 计算上家是否听牌
-  // 检查摸到的牌并调用回调
-  private next() {
-    const { mahjong, round, callback } = this
-    const ctx = new MahjongContext(mahjong, mahjong.index(round.kaze), round.player, callback)
-    ctx.check()
-    this.callback([ctx])
-  }
-
-  check() {
-    this.clear()
-    const ankan = this.player.ankanTiles
-    if (ankan.length !== 0) {
-      this.buttons.add('kan')
-      this.ankanTiles = ankan
-    }
-    const chakan = this.player.chakanTiles
-    if (chakan.length !== 0) {
-      this.buttons.add('kan')
-      this.chakanTiles = chakan
-    }
-    const shanten = this.player.calcShanten14()
-    const tempai = shanten.filter(([, shanten]) => shanten === 0)
-    if (tempai.length !== 0) {
-      this.tempai = tempai.map(tempai => [tempai[0], tempai[2]])
-      if (this.player.naki === 0) this.buttons.add('riichi')
-      // TODO: 副露自摸？
-      for (const [kiru, , tp] of tempai) {
-        if (tp.find(pai => comparePai(kiru, pai) === 0)) {
-          this.buttons.add('tsumo')
-          break
-        }
-      }
-    }
+    this.mahjong.mopai()
   }
 }
 
@@ -163,12 +68,46 @@ export class Mahjong {
   num = 0
 
   constructor(
-    public callback: (ctxs: MahjongContext[]) => void
+    public callback: (ctxs: { [k in Kaze]?: MahjongContext }) => void
   ) {
     this.createRound()
-    const ctx = new MahjongContext(this, this.index(this.kaze), this.round.player, callback)
-    ctx.check()
-    callback([ctx])
+    this.next()
+  }
+
+  mopai() {
+    if (this.round.rest === 0) {
+      // TODO: 荒牌流局
+      return
+    }
+    this.round.mopai()
+    this.next()
+  }
+
+  // 摸牌后调用此函数
+  next() {
+    const kaze = this.round.kaze
+    const action = this.round.action(kaze)
+    if (!action) throw new Error('unreachable')
+    this.callback({
+      [kaze]: new MahjongContext(this, this.index(kaze), this.round.player, action),
+    })
+  }
+
+  // 打出牌后调用此函数检查别的几家有没有按钮
+  // 检查荒牌流局
+  naki() {
+    const kaze = kazes.filter(kaze => kaze !== this.round.kaze)
+    const ctxs: { [k in Kaze]?: MahjongContext } = {}
+    for (const k of kaze) {
+      const action = this.round.action(k)
+      if (!action) continue
+      ctxs[k] = new MahjongContext(this, this.index(k), this.round[k], action)
+    }
+    if (Object.values(ctxs).length === 0) {
+      this.mopai()
+    } else {
+      this.callback(ctxs)
+    }
   }
 
   createRound() {
