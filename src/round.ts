@@ -113,15 +113,13 @@ export class Round {
     return [dora, uraDora]
   }
 
-  // 摸牌
-  mopai(): boolean {
-    if (this.rest === 0) return false
-    const kaze = shimocha(this.kaze)
+  // 如果没有提供 kaze 参数，则切换到下家并摸牌
+  mopai(kaze?: Kaze) {
+    kaze ||= shimocha(this.kaze)
     const tile = this.haiyama.shift()
     tile.from.kaze = kaze
     this[kaze].tiles.push(tile)
     this.kaze = kaze
-    return true
   }
 
   // 打牌
@@ -149,11 +147,7 @@ export class Round {
     this.player.ho.pop()
     tiles.push(this.kiru)
     player.chi.push(tiles)
-
-    const mopai = this.haiyama.shift()
-    mopai.from.kaze = kaze
-    player.tiles.push(mopai)
-    this.kaze = kaze
+    this.mopai(kaze)
   }
 
   pon(kaze: Kaze, tiles: Tile[]) {
@@ -185,10 +179,7 @@ export class Round {
     tiles.push(this.kiru)
     player.minkan.push(tiles)
 
-    const mopai = this.haiyama.shift()
-    mopai.from.kaze = kaze
-    player.tiles.push(mopai)
-    this.kaze = kaze
+    this.mopai(kaze)
     this.kanCount++
   }
 
@@ -201,9 +192,7 @@ export class Round {
     }
     this.player.ankan.push(tiles)
 
-    const mopai = this.haiyama.shift()
-    mopai.from.kaze = this.kaze
-    this.player.tiles.push(mopai)
+    this.mopai(this.kaze)
     this.kanCount++
   }
 
@@ -216,9 +205,7 @@ export class Round {
       }
     }
 
-    const mopai = this.haiyama.shift()
-    mopai.from.kaze = this.kaze
-    this.player.tiles.push(mopai)
+    this.mopai(this.kaze)
     this.kanCount++
   }
 
@@ -262,6 +249,9 @@ export class Player {
   // 牌河
   ho: Tile[] = []
   riichi: boolean = false
+
+  // 打出牌时设置
+  tempai: Pai[]
 
   constructor(
     public round: Round,
