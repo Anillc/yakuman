@@ -8,8 +8,19 @@ export interface Shanten {
   type: 'chitoitsu' | 'kokushimuso' | 'normal'
 }
 
-export function shanten(counts: Counts) {
-  
+export function shanten(counts: Counts, naki: number): [number, Pai[]] {
+  const shanten: [number, Pai[]][] = []
+  if (naki === 0) {
+    shanten.push(chitoitsuShanten(counts))
+    shanten.push(kokushimusoShanten(counts))
+  }
+  shanten.push(normalShanten(counts, naki))
+  const result = shanten.reduce((acc, x) => {
+    if (acc[0] < x[0]) return acc
+    if (acc[0] > x[0]) return x
+    return [x[0], [...acc[1], ...x[1]]]
+  })
+  return [result[0], uniqPai(result[1])]
 }
 
 // 七对子

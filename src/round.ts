@@ -1,4 +1,4 @@
-import { chitoitsuShanten, kokushimusoShanten, normalShanten } from './tempai'
+import { chitoitsuShanten, kokushimusoShanten, normalShanten, shanten } from './tempai'
 import { Pai, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
@@ -262,19 +262,8 @@ export class Player {
   calcShanten13(tiles?: Tile[]): [number, Pai[]] {
     tiles ||= this.tiles
     const counts = group(tiles)
-    const shanten: [number, Pai[]][] = []
     const naki = this.naki + this.ankan.length
-    if (naki === 0) {
-      shanten.push(chitoitsuShanten(counts))
-      shanten.push(kokushimusoShanten(counts))
-    }
-    shanten.push(normalShanten(counts, naki))
-    const result = shanten.reduce((acc, x) => {
-      if (acc[0] < x[0]) return acc
-      if (acc[0] > x[0]) return x
-      return [x[0], [...acc[1], ...x[1]]]
-    })
-    return [result[0], uniqPai(result[1])]
+    return shanten(counts, naki)
   }
 
   calcShanten14(): [Pai, number, Pai[]][] {
