@@ -5,14 +5,14 @@ import {
 } from './utils'
 
 export interface Shanten {
-  type: 'chitoitsu' | 'kokushimuso' | 'normal'
+  type: 'chitoitsu' | 'kokushimusou' | 'normal'
 }
 
 export function shanten(counts: Counts, naki: number): [number, Pai[]] {
   const shanten: [number, Pai[]][] = []
   if (naki === 0) {
     shanten.push(chitoitsuShanten(counts))
-    shanten.push(kokushimusoShanten(counts))
+    shanten.push(kokushimusouShanten(counts))
   }
   shanten.push(normalShanten(counts, naki))
   const result = shanten.reduce((acc, x) => {
@@ -47,7 +47,7 @@ export function chitoitsuShanten(counts: Counts): [shanten: number, shantenPai: 
 }
 
 // 国士无双
-export function kokushimusoShanten(counts: Counts): [shanten: number, shantenPai: Pai[]] {
+export function kokushimusouShanten(counts: Counts): [shanten: number, shantenPai: Pai[]] {
   // 幺九牌
   const yaochu = [
     counts['man'][0], counts['man'][8],

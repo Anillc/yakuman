@@ -1,4 +1,4 @@
-import { chitoitsuShanten, kokushimusoShanten, normalShanten, shanten } from './tempai'
+import { shanten } from './tempai'
 import { Pai, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'

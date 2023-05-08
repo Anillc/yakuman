@@ -178,6 +178,7 @@ export class Mahjong {
   }
 
   nextKaze() {
+    // TODO: 结束、连庄
     if (this.num === 4) {
       this.num = 1
       this.kaze = shimocha(this.kaze)
