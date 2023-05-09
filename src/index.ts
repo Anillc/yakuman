@@ -51,6 +51,7 @@ export class MahjongContext implements Action {
   }
 
   chakan(tile: Tile) {
+    // TODO: 抢杠
     this.round.chakan(tile)
     this.mahjong.next()
   }
@@ -109,6 +110,8 @@ export class Mahjong {
       this.callback(ctxs)
     }
   }
+
+  // TODO: kanNaki
 
   createRound() {
     this.nextKaze()

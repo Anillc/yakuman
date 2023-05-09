@@ -4,6 +4,9 @@ import { Pai, comparePai, group, shimocha, shuffle, toPaiArray, uniqPai } from '
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 export const kazes: Kaze[] = ['ton', 'nan', 'sha', 'pei']
 
+export type Sangen = 'white' | 'green' | 'red'
+export const sangens: Sangen[] = ['white', 'green', 'red']
+
 export type TileType = 'pin' | 'so' | 'man' | 'kaze' | 'sangen'
 
 export class Tile {
@@ -114,15 +117,15 @@ export class Round {
     const wanpai = this.haiyama.slice(this.haiyama.length - 14)
     for (let i = 0; i < 4 - this.kanCount; i++) wanpai.pop()
     const dora: Tile[] = []
-    const uraDora: Tile[] = []
+    const uradora: Tile[] = []
     for (let i = wanpai.length - 1; i > 0; i--) {
       if ((14 - i) % 2 !== 0) {
         dora.push(wanpai[i])
       } else {
-        uraDora.push(wanpai[i])
+        uradora.push(wanpai[i])
       }
     }
-    return [dora, uraDora]
+    return [dora, uradora]
   }
 
   // 如果没有提供 kaze 参数，则切换到下家并摸牌
@@ -143,6 +146,7 @@ export class Round {
   }
 
   // 打牌
+  // TODO: 四风连打
   dahai(tile: Tile, riichi: boolean) {
     // TODO: fix this
     if (this.kaze === 'ton') this.jun++
