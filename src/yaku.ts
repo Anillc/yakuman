@@ -151,29 +151,6 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
     fu += 10
   }
 
-  if (type === 'chitoitsu') {
-    // 七对子
-    yaku.chitoitsu = 2
-    fu = 25
-  }
-  if (type === 'kokushimusou') {
-    // 国士无双
-    yaku.kokushimusou = 13
-  }
-  if (type === 'kokushimusou13') {
-    // 国士无双十三面
-    yaku.kokushimusou13 = 26
-  }
-  if (type === 'normal') {
-    const last = horaTile || player.tiles.at(-1)
-    const tempai = horaTile ? player.tiles : player.tiles.slice(0, -1)
-    const [, decomposed] = normalShanten(group(tempai), player.naki + player.ankan.length)
-
-    for (const [pai, dec] of decomposed) {
-      if (!last.equals(pai)) continue
-    }
-
-  }
   const all = [
     player.tiles, player.chi, player.pon.map(pon => pon.tiles),
     player.minkan, player.ankan, horaTile,
@@ -204,8 +181,10 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
 
   if (round.rest === 0) {
     if (horaTile) {
+      // 河底
       yaku.hotei = 1
     } else {
+      // 海底
       yaku.haitei = 1
     }
   }
@@ -251,6 +230,53 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
       yaku.reddora ||= 0
       yaku.reddora++
     }
+  }
+
+  // 混老头
+  let honroto = true
+  // 清老头
+  let chinroto = true
+  for (const tile of all) {
+    if (['man', 'so', 'pin'].includes(tile.type)) {
+      if (tile.num !== 1 && tile.num !== 9) {
+        honroto = false
+        chinroto = false
+        break
+      }
+    } else {
+      chinroto = false
+    }
+  }
+  if (chinroto) {
+    yaku.chinroto = 13
+  } else if (honroto) {
+    yaku.honroto = 2
+  }
+
+  // 与牌型相关的役
+  if (type === 'chitoitsu') {
+    // 七对子
+    yaku.chitoitsu = 2
+    fu = 25
+  }
+  if (type === 'kokushimusou') {
+    // 国士无双
+    yaku.kokushimusou = 13
+  }
+  if (type === 'kokushimusou13') {
+    // 国士无双十三面
+    yaku.kokushimusou13 = 26
+  }
+  if (type === 'normal') {
+    const last = horaTile || player.tiles.at(-1)
+    const tempai = horaTile ? player.tiles : player.tiles.slice(0, -1)
+    const [, decomposed] = normalShanten(group(tempai), player.naki + player.ankan.length)
+
+    for (const [pai, dec] of decomposed) {
+      if (!last.equals(pai)) continue
+      // TODO:
+    }
+
   }
 }
 
@@ -417,7 +443,7 @@ export function normalYaku(
   if (kotsu1.length >= 3) {
     let block: Block
     while (block = kotsu1.shift()) {
-      let same = 0
+      let same = 1
       for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
         if (block.tileType === type) continue
         const index = kotsu1.findIndex(kotsu => arrayEquals(block.tiles, kotsu.tiles))
@@ -426,8 +452,9 @@ export function normalYaku(
           same++
         }
       }
-      if (same === 2) {
+      if (same === 3) {
         yaku.sanshokudoko = 2
+        break
       }
     }
   }
@@ -442,5 +469,103 @@ export function normalYaku(
     yaku.toitoi = 2
   }
 
-  // const anko = decomposedWithoutLastTile.filter()
+  // 三暗刻
+  if (anko === 3) {
+    yaku.sananko = 2
+  }
+
+  if (anko === 4) {
+    if (tanki) {
+      // 四暗刻单骑
+      yaku.suankotanki = 26
+    } else {
+      // 四暗刻
+      yaku.suanko = 13
+    }
+  }
+
+  const sangenMentsu = mentsu.filter(mentsu => mentsu.tileType === 'sangen')
+  const sangenToitsu = mentsu.filter(mentsu => mentsu.tileType === 'sangen')
+
+  // 小三元
+  if (sangenMentsu.length === 2 && sangenToitsu.length === 1) {
+    yaku.shosangen = 2
+  }
+
+  // 大三元
+  if (sangenMentsu.length === 3) {
+    yaku.daisangen = 13
+  }
+
+  if (!(yaku.honroto || yaku.chinroto)) {
+    // 混全带幺九
+    let chanta = true
+    // 纯全带幺九
+    let junchan = true
+    for (const mt of mentsu) {
+      if (['man', 'so', 'pin'].includes(mt.tileType)) {
+        if (!(mt.tiles.includes(1) || mt.tiles.includes(9))) {
+          chanta = false
+          junchan = false
+          break
+        }
+      } else {
+        junchan = false
+      }
+    }
+    if (player.naki === 0) {
+      if (junchan) {
+        yaku.junchan = 3
+      } else if (chanta) {
+        yaku.chanta = 2
+      }
+    } else {
+      if (junchan) {
+        yaku.junchan = 2
+      } else if (chanta) {
+        yaku.chanta = 1
+      }
+    }
+  }
+
+  // 一气通贯
+  for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
+    const st = shuntsu.filter(shuntsu => shuntsu.tileType === type)
+    const a = st.find(shuntsu => shuntsu.tiles[0] === 1)
+    const b = st.find(shuntsu => shuntsu.tiles[0] === 4)
+    const c = st.find(shuntsu => shuntsu.tiles[0] === 7)
+    if (a && b && c) {
+      if (player.naki === 0) {
+        yaku.ittsu = 2
+      } else {
+        yaku.ittsu = 1
+      }
+      break
+    }
+  }
+
+  // 三色同顺
+  const shuntsu1 = [...shuntsu]
+  if (shuntsu1.length >= 3) {
+    let block: Block
+    while (block = shuntsu1.shift()) {
+      let same = 1
+      for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
+        if (block.tileType === type) continue
+        const index = shuntsu1.findIndex(shuntsu => arrayEquals(block.tiles, shuntsu.tiles))
+        if (index !== -1) {
+          shuntsu1.splice(index, 1)
+          same++
+        }
+      }
+      if (same === 3) {
+        if (player.naki === 0) {
+          yaku.sanshokudojun = 2
+        } else {
+          yaku.sanshokudojun = 1
+        }
+        break
+      }
+    }
+  }
 }
