@@ -165,6 +165,8 @@ export class Round {
           throw new Error('unreachable')
         }
         this.player.riichi = {
+          // TODO: 双立直
+          double: false,
           iipatsu: true,
           decomposed: decompose(group(this.player.tiles)),
         }
@@ -372,6 +374,7 @@ interface Pon {
 }
 
 export interface Riichi {
+  double: boolean
   iipatsu: boolean
   decomposed: Decomposed[]
 }

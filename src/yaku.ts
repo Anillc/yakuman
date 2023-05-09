@@ -1,5 +1,5 @@
-import { Player, Round, Tile, kazes, sangens } from './round'
-import { Block, chitoitsuShanten, decompose, kokushimusouShanten, minShanten } from './tempai'
+import { Player, Round, Tile, TileType, kazes, sangens } from './round'
+import { Block, Decomposed, chitoitsuShanten, decompose, kokushimusouShanten, minShanten, normalShanten } from './tempai'
 import { Pai, arrayEquals, group } from './utils'
 
 export interface Yaku {
@@ -115,26 +115,34 @@ export interface Yaku {
   daisushi?: 26
 }
 
-export function yaku(round: Round, player: Player, horaTile: Tile, chankan: boolean) {
-  const yaku: Yaku = {}
-  const tiles = horaTile ? player.tiles.concat(horaTile) : player.tiles
-  const counts = group(tiles)
-  let type: 'normal' | 'chitoitsu' | 'kokushimusou'
-  const [shanten, decomposed] = minShanten(decompose(counts), player.naki + player.ankan.length)
+type HoraType = 'chitoitsu' | 'kokushimusou' | 'kokushimusou13' | 'normal'
+
+function checkType(round: Round, player: Player, horaTile: Tile): HoraType {
+  const counts = group(horaTile ? player.tiles.concat(horaTile) : player.tiles)
+  const [shanten] = minShanten(decompose(counts), player.naki + player.ankan.length)
   const chitoi = chitoitsuShanten(counts)
   const kokushi = kokushimusouShanten(counts)
   if (chitoi[0] === -1) {
-    type = 'chitoitsu'
+    return 'chitoitsu'
   }
   if (kokushi[0] === -1) {
-    type = 'kokushimusou'
+    if (kokushi[1].length !== 1) {
+      return 'kokushimusou13'
+    } else {
+      return 'kokushimusou'
+    }
   }
   if (shanten === -1) {
-    // TODO: 可能出现多种分解， 按点数高的计算
-    // if (decomposed.length !== 1) throw new Error('unreachable')
-    type = 'normal'
+    return 'normal'
   }
+}
+
+
+export function yaku(round: Round, player: Player, horaTile: Tile, chankan: boolean) {
+  const yaku: Yaku = {}
+  let type = checkType(round, player, horaTile)
   let fu = 20
+
   if (!horaTile) {
     fu += 2
   } else if (horaTile && player.naki === 0) {
@@ -142,110 +150,29 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
     yaku.tsumo = 1
     fu += 10
   }
+
   if (type === 'chitoitsu') {
     // 七对子
     yaku.chitoitsu = 2
     fu = 25
   }
   if (type === 'kokushimusou') {
-    if (kokushi[1].length !== 1) {
-      // 国士无双十三面
-      yaku.kokushimusou13 = 26
-    } else {
-      // 国士无双
-      yaku.kokushimusou = 13
-    }
+    // 国士无双
+    yaku.kokushimusou = 13
+  }
+  if (type === 'kokushimusou13') {
+    // 国士无双十三面
+    yaku.kokushimusou13 = 26
   }
   if (type === 'normal') {
-    // 立直
-    if (player.riichi) {
-      if (player.naki !== 0) throw new Error('unreachable')
-      yaku.riichi = 1
-      // 一发
-      if (player.riichi.iipatsu) {
-        yaku.ippatsu = 1
-      }
+    const last = horaTile || player.tiles.at(-1)
+    const tempai = horaTile ? player.tiles : player.tiles.slice(0, -1)
+    const [, decomposed] = normalShanten(group(tempai), player.naki + player.ankan.length)
+
+    for (const [pai, dec] of decomposed) {
+      if (!last.equals(pai)) continue
     }
 
-    // TODO: 计算碰、杠
-    const blocks = decomposed[0].blocks
-    for (const block of blocks) {
-      if (block.type === 'kotsu') {
-        // 场风
-        if (block.tileType === 'kaze' && kazes[block.tiles[0] - 1] === round.bakaze) {
-          yaku.bakaze = 1
-        }
-        // 自风
-        if (block.tileType === 'kaze' && kazes[block.tiles[0] - 1] === player.kaze) {
-          yaku.jikaze = 1
-        }
-        // 白发中
-        if (block.tileType === 'sangen') {
-          yaku[sangens[block.tiles[0] - 1]] = 1
-        }
-        // TODO: 算符
-      }
-    }
-
-    // 平和
-    if (player.naki === 0) {
-      const kotsu = blocks.some(block => block.type === 'kotsu')
-      const toitsu = blocks.reduce((acc, x) => {
-        if (x.type === 'toitsu') {
-          acc.push(x)
-          return acc
-        } else {
-          return acc
-        }
-      }, [] as Block[])
-      const yakuhai = toitsu.some(toitsu => {
-        if (toitsu.tileType === 'sangen') {
-          return true
-        }
-        if (toitsu.tileType === 'kaze') {
-          const kaze = kazes[toitsu.tiles[0] - 1]
-          return kaze === round.bakaze || kaze === player.kaze
-        }
-      })
-      if (!kotsu && toitsu.length === 1 && !yakuhai) {
-        const last = horaTile || player.tiles.at(-1)
-        const tempai = horaTile ? player.tiles : player.tiles.slice(0, -1)
-        const [, decomposed] = minShanten(decompose(group(tempai)), 0)
-        let pinfu = false
-        out: for (const dec of decomposed) {
-          for (const block of dec.blocks) {
-            if (block.type === 'ryammen') {
-              const left = last.equals(block.tileType, block.tiles[0] - 1)
-              const right = last.equals(block.tileType, block.tiles[1] + 1)
-              if (left || right) {
-                pinfu = true
-                break out
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // 一杯口/两杯口
-    if (player.naki === 0) {
-      let result = 0
-      const shuntsu = blocks.filter(block => block.type === 'shuntsu')
-      let block: Block
-      while (block = shuntsu.shift()) {
-        const index = shuntsu.findIndex(shuntsu =>
-          shuntsu.tileType === block.tileType && arrayEquals(shuntsu.tiles, block.tiles))
-        if (index !== -1) {
-          shuntsu.splice(index, 1)
-          result++
-        }
-      }
-      if (result === 1) {
-        yaku.iipeko = 1
-      } else {
-        yaku.ryampeko = 3
-      }
-    }
   }
   const all = [
     player.tiles, player.chi, player.pon.map(pon => pon.tiles),
@@ -325,4 +252,195 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
       yaku.reddora++
     }
   }
+}
+
+export function normalYaku(
+  round: Round, player: Player, yaku: Yaku,
+  decomposed: Decomposed, last: Tile, tsumo: boolean,
+) {
+  // 立直
+  if (player.riichi) {
+    if (player.naki !== 0) throw new Error('unreachable')
+    if (player.riichi.double) {
+      yaku.doubleriichi = 2
+    } else {
+      yaku.riichi = 1
+    }
+    // 一发
+    if (player.riichi.iipatsu) {
+      yaku.ippatsu = 1
+    }
+  }
+
+  const mentsu: Block[] = []
+  const toitsu: Block[] = []
+
+  let anko = 0
+  let tanki = false
+  let ryammen = false
+
+  for (const block of decomposed.blocks) {
+    if (block.type === 'shuntsu' || block.type === 'kotsu') {
+      mentsu.push(block)
+    }
+    if (block.type === 'toitsu') {
+      toitsu.push(block)
+      anko++
+    }
+    if (block.type === 'kanchan') {
+      mentsu.push({
+        type: 'shuntsu',
+        tileType: block.tileType,
+        tiles: [block.tiles[0], last.num, block.tiles[1]],
+      })
+    }
+    if (block.type === 'penchan') {
+      mentsu.push({
+        type: 'shuntsu',
+        tileType: block.tileType,
+        tiles: block.tiles[0] - 1 === last.num
+          ? [last.num, ...block.tiles]
+          : [...block.tiles, last.num],
+      })
+    }
+    if (block.type === 'ryammen') {
+      ryammen = true
+      mentsu.push({
+        type: 'shuntsu',
+        tileType: block.tileType,
+        tiles: block.tiles[0] - 1 === last.num
+          ? [last.num, ...block.tiles]
+          : [...block.tiles, last.num],
+      })
+    }
+  }
+
+  if (mentsu.length === 3 && toitsu.length === 2) {
+    const kotsuIndex = toitsu.findIndex(toitsu => last.equals(toitsu.tileType, toitsu.tiles[0]))
+    if (kotsuIndex === -1) throw new Error('unreachable')
+    const kotsu = toitsu.splice(kotsuIndex, 1)[0]
+    mentsu.push({
+      type: 'kotsu',
+      tileType: kotsu.tileType,
+      tiles: kotsu.tiles.concat(last.num)
+    })
+    if (tsumo) anko++
+  } else if (mentsu.length === 4) {
+    tanki = true
+    // TODO: check this
+    toitsu.push({
+      type: 'toitsu',
+      tileType: last.type,
+      tiles: [last.num, last.num],
+    })
+  }
+
+  for (const chi of player.chi) {
+    mentsu.push({
+      type: 'shuntsu',
+      tileType: chi[0].type,
+      tiles: chi.map(tile => tile.num),
+    })
+  }
+  for (const pon of player.pon) {
+    mentsu.push({
+      type: 'kotsu',
+      tileType: pon[0].type,
+      tiles: pon.tiles.map(tile => tile.num),
+    })
+  }
+  for (const kan of [...player.chi, ...player.minkan, ...player.ankan]) {
+    mentsu.push({
+      type: 'kotsu',
+      tileType: kan[0].type,
+      tiles: kan.map(tile => tile.num),
+    })
+  }
+
+  const kotsu = mentsu.filter(mentsu => mentsu.type === 'kotsu')
+  const shuntsu = mentsu.filter(mentsu => mentsu.type === 'shuntsu')
+
+  for (const block of kotsu) {
+    // 场风
+    if (block.tileType === 'kaze' && kazes[block.tiles[0] - 1] === round.bakaze) {
+      yaku.bakaze = 1
+    }
+    // 自风
+    if (block.tileType === 'kaze' && kazes[block.tiles[0] - 1] === player.kaze) {
+      yaku.jikaze = 1
+    }
+    // 白发中
+    if (block.tileType === 'sangen') {
+      yaku[sangens[block.tiles[0] - 1]] = 1
+    }
+    // TODO: 算符
+  }
+
+  // 平和
+  if (player.naki === 0) {
+    const hasYakuhai = toitsu.some(toitsu => {
+      if (toitsu.tileType === 'sangen') {
+        return true
+      }
+      if (toitsu.tileType === 'kaze') {
+        const kaze = kazes[toitsu.tiles[0] - 1]
+        return kaze === round.bakaze || kaze === player.kaze
+      }
+    })
+    if (kotsu.length === 0 && toitsu.length === 1 && !hasYakuhai && ryammen) {
+      yaku.pinfu = 1
+    }
+  }
+
+  // 一杯口/两杯口
+  if (player.naki === 0) {
+    let count = 0
+    const shuntsu1 = [...shuntsu]
+    let block: Block
+    while (block = shuntsu1.shift()) {
+      const index = shuntsu1.findIndex(shuntsu =>
+        shuntsu.tileType === block.tileType && arrayEquals(shuntsu.tiles, block.tiles))
+      if (index !== -1) {
+        shuntsu1.splice(index, 1)
+        count++
+      }
+    }
+    if (count === 1) {
+      yaku.iipeko = 1
+    } else {
+      yaku.ryampeko = 3
+    }
+  }
+
+  // 三色同刻
+  const kotsu1 = [...kotsu]
+  if (kotsu1.length >= 3) {
+    let block: Block
+    while (block = kotsu1.shift()) {
+      let same = 0
+      for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
+        if (block.tileType === type) continue
+        const index = kotsu1.findIndex(kotsu => arrayEquals(block.tiles, kotsu.tiles))
+        if (index !== -1) {
+          kotsu1.splice(index, 1)
+          same++
+        }
+      }
+      if (same === 2) {
+        yaku.sanshokudoko = 2
+      }
+    }
+  }
+
+  // 三杠子
+  if (player.minkan.length + player.ankan.length === 3) {
+    yaku.sankantsu = 2
+  }
+
+  // 对对和
+  if (kotsu.length === 4) {
+    yaku.toitoi = 2
+  }
+
+  // const anko = decomposedWithoutLastTile.filter()
 }

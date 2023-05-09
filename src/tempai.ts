@@ -1,6 +1,6 @@
 import type { TileType } from './round'
 import {
-  Counts, Pai, addCounts, cartesian, cloneCounts, createEmptyCounts,
+  Counts, Pai, addCounts, cartesian, cloneCounts, comparePai, createEmptyCounts,
   sortBlocks, uniqDecomposed, uniqNumberDecomposed, uniqPai
 } from './utils'
 
@@ -9,16 +9,17 @@ export interface Shanten {
 }
 
 export function shanten(counts: Counts, naki: number): [number, Pai[]] {
-  const shanten: ([number, Pai[]] | [number, Pai[], Decomposed[]])[] = []
+  const shanten: [number, Pai[]][] = []
   if (naki === 0) {
     shanten.push(chitoitsuShanten(counts))
     shanten.push(kokushimusouShanten(counts))
   }
-  shanten.push(normalShanten(counts, naki))
+  const normal = normalShanten(counts, naki)
+  shanten.push([normal[0], normal[1].map(x => x[0])])
   const result = shanten.reduce((acc, x) => {
     if (acc[0] < x[0]) return acc
     if (acc[0] > x[0]) return x
-    return [x[0], [...acc[1], ...x[1]], acc[2] || x[2]]
+    return [x[0], [...acc[1], ...x[1]]]
   })
   return [result[0], uniqPai(result[1])]
 }
@@ -79,10 +80,19 @@ export function kokushimusouShanten(counts: Counts): [shanten: number, shantenPa
   return [shanten, uniqPai(tempi)]
 }
 
-export function normalShanten(counts: Counts, naki: number): [shanten: number, shantenPai: Pai[], decomposed: Decomposed[]] {
-  const shantenPai: Pai[] = []
+export function normalShanten(counts: Counts, naki: number): [shanten: number, tempai: [Pai, Decomposed[]][]] {
+  const result: [Pai, Decomposed[]][] = []
   const [shanten, decomposed] = minShanten(decompose(counts), naki)
   for (const dec of decomposed) {
+    function add(pai: Pai) {
+      const element = result.find(element => comparePai(element[0], pai) === 0)
+      if (!element) {
+        result.push([pai, [dec]])
+      } else {
+        element[1].push(dec)
+      }
+    }
+
     const {
       shuntsu, kotsu, toitsu,
       ryammen, penchan, kanchan,
@@ -97,15 +107,15 @@ export function normalShanten(counts: Counts, naki: number): [shanten: number, s
     const tatsuLength = ryammen.length + penchan.length + kanchan.length
 
     for (const rm of ryammen) {
-      shantenPai.push({ type: rm.tileType, num: rm.tiles[0] - 1 })
-      shantenPai.push({ type: rm.tileType, num: rm.tiles[1] + 1 })
+      add({ type: rm.tileType, num: rm.tiles[0] - 1 })
+      add({ type: rm.tileType, num: rm.tiles[1] + 1 })
     }
     for (const pc of penchan) {
       const num = pc.tiles[0] === 1 ? pc.tiles[1] + 1 : pc.tiles[0] - 1
-      shantenPai.push({ type: pc.tileType, num })
+      add({ type: pc.tileType, num })
     }
     for (const kc of kanchan) {
-      shantenPai.push({ type: kc.tileType, num: kc.tiles[0] + 1 })
+      add({ type: kc.tileType, num: kc.tiles[0] + 1 })
     }
     // 分没有对子、一个对子和多个对子三种情况
     function makeTatsu() {
@@ -114,14 +124,14 @@ export function normalShanten(counts: Counts, naki: number): [shanten: number, s
           if (dec.rest[type][i] === 0) continue
           if (i - 2 < 0 || i + 2 > 8) continue
           for (const tile of [i - 2, i - 1, i, i + 1, i + 2]) {
-            shantenPai.push({ type: type as TileType, num: tile + 1 })
+            add({ type: type as TileType, num: tile + 1 })
           }
         }
       }
       for (const type of ['kaze', 'sangen'] satisfies TileType[]) {
         for (let i = 0; i < dec.rest[type].length; i++) {
           if (dec.rest[type][i] === 0) continue
-          shantenPai.push({ type: type as TileType, num: i + 1 })
+          add({ type: type as TileType, num: i + 1 })
         }
       }
     }
@@ -133,7 +143,7 @@ export function normalShanten(counts: Counts, naki: number): [shanten: number, s
         for (const [type, tiles] of Object.entries(dec.rest)) {
           for (let i = 0; i < tiles.length; i++) {
             if (tiles[i] === 0) continue
-            shantenPai.push({ type: type as TileType, num: i + 1 })
+            add({ type: type as TileType, num: i + 1 })
           }
         }
       }
@@ -143,14 +153,14 @@ export function normalShanten(counts: Counts, naki: number): [shanten: number, s
       makeTatsu()
       // 将对子做成刻子
       for (const tt of toitsu) {
-        shantenPai.push({
+        add({
           type: tt.tileType,
           num: tt.tiles[0],
         })
       }
     }
   }
-  return [shanten, uniqPai(shantenPai), decomposed]
+  return [shanten, result]
 }
 
 export type BlockType = 'shuntsu' | 'kotsu' | 'toitsu' | 'ryammen' | 'penchan' | 'kanchan'
