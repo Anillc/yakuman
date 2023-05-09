@@ -3,6 +3,9 @@ import { Block, Decomposed, chitoitsuShanten, decompose, kokushimusouShanten, mi
 import { Pai, arrayEquals, group } from './utils'
 
 export interface Yaku {
+  fu: number
+  fan: number
+
   // 一番
   // 立直 (门前清)
   riichi?: 1
@@ -117,6 +120,9 @@ export interface Yaku {
   daisushi?: 26
 }
 
+export const yakuman = ['tenho', 'chiho', 'daisangen', 'suanko', 'tsuiso', 'ryuiso', 'chinroto', 'kokushimusou', 'shosushi', 'sukantsu', 'kyuurempoto']
+export const doubleyakuman = ['suankotanki', 'kokushimusou13', 'junseikyuurempoto', 'daisushi']
+
 type HoraType = 'chitoitsu' | 'kokushimusou' | 'kokushimusou13' | 'normal'
 
 function checkType(player: Player, horaTile: Tile): HoraType {
@@ -141,16 +147,15 @@ function checkType(player: Player, horaTile: Tile): HoraType {
 
 
 export function yaku(round: Round, player: Player, horaTile: Tile, chankan: boolean) {
-  const yaku: Yaku = {}
+  const yaku: Yaku = { fu: 20, fan: 0 }
   let type = checkType(player, horaTile)
-  let fu = 20
 
-  if (!horaTile) {
-    fu += 2
-  } else if (horaTile && player.naki === 0) {
+  if (horaTile) {
+    yaku.fu += 10
+  } else if (!horaTile && player.naki === 0) {
     // 门前清自摸
     yaku.tsumo = 1
-    fu += 10
+    yaku.fu += 2
     if (round.chihoRyuukyokuDoubleRiichi) {
       if (player.kaze === 'ton') {
         yaku.tenho = 13
@@ -345,24 +350,33 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
   if (type === 'chitoitsu') {
     // 七对子
     yaku.chitoitsu = 2
-    fu = 25
+    yaku.fu = 25
   }
   if (type === 'kokushimusou') {
     // 国士无双
     yaku.kokushimusou = 13
+    yaku.fu = 25
   }
   if (type === 'kokushimusou13') {
     // 国士无双十三面
     yaku.kokushimusou13 = 26
+    yaku.fu = 25
   }
   if (type === 'normal') {
     const [, decomposed] = normalShanten(group(tilesWithoutLast), player.naki + player.ankan.length)
 
-    for (const [pai, dec] of decomposed) {
+    const yakus: Yaku[] = []
+    for (const [pai, decs] of decomposed) {
       if (!last.equals(pai)) continue
-      // TODO:
+      for (const dec of decs) {
+        const y = { ...yaku }
+        yakus.push(y)
+        normalYaku(round, player, yaku, dec, last, !!horaTile)
+      }
     }
-
+    return yakus.map(yaku => final(yaku)).reduce((acc, x) => acc[1] > x[1] ? x : acc, [null, -Infinity])
+  } else {
+    return final(yaku, type === 'chitoitsu')
   }
 }
 
@@ -390,16 +404,31 @@ export function normalYaku(
   let anko = 0
   let tanki = false
   let ryammen = false
+  let penchan = false
+  let kanchan = false
 
   for (const block of decomposed.blocks) {
-    if (block.type === 'shuntsu' || block.type === 'kotsu') {
+    if (block.type === 'shuntsu') {
       mentsu.push(block)
+    }
+    if (block.type === 'kotsu') {
+      mentsu.push(block)
+      if (['man', 'so', 'pin'].includes(block.tileType)) {
+        if ([1, 9].includes(block.tiles[0])) {
+          yaku.fu += 8
+        } else {
+          yaku.fu += 4
+        }
+      } else {
+        yaku.fu += 8
+      }
+      anko++
     }
     if (block.type === 'toitsu') {
       toitsu.push(block)
-      anko++
     }
     if (block.type === 'kanchan') {
+      kanchan = true
       mentsu.push({
         type: 'shuntsu',
         tileType: block.tileType,
@@ -407,6 +436,7 @@ export function normalYaku(
       })
     }
     if (block.type === 'penchan') {
+      penchan = true
       mentsu.push({
         type: 'shuntsu',
         tileType: block.tileType,
@@ -436,7 +466,18 @@ export function normalYaku(
       tileType: kotsu.tileType,
       tiles: kotsu.tiles.concat(last.num)
     })
-    if (tsumo) anko++
+    if (tsumo) {
+      if (['man', 'so', 'pin'].includes(kotsu.tileType)) {
+        if ([1, 9].includes(kotsu.tiles[0])) {
+          yaku.fu += 8
+        } else {
+          yaku.fu += 4
+        }
+      } else {
+        yaku.fu += 8
+      }
+      anko++
+    }
   } else if (mentsu.length === 4) {
     tanki = true
     // TODO: check this
@@ -445,6 +486,10 @@ export function normalYaku(
       tileType: last.type,
       tiles: [last.num, last.num],
     })
+  }
+
+  if (tanki || penchan || kanchan) {
+    yaku.fu += 2
   }
 
   for (const chi of player.chi) {
@@ -457,16 +502,50 @@ export function normalYaku(
   for (const pon of player.pon) {
     mentsu.push({
       type: 'kotsu',
-      tileType: pon[0].type,
+      tileType: pon.tiles[0].type,
       tiles: pon.tiles.map(tile => tile.num),
     })
+    if (['man', 'so', 'pin'].includes(pon.tiles[0].type)) {
+      if ([1, 9].includes(pon.tiles[0].num)) {
+        yaku.fu += pon.chakan ? 16 : 4
+      } else {
+        yaku.fu += pon.chakan ? 8 : 2
+      }
+    } else {
+      yaku.fu += pon.chakan ? 16 : 4
+    }
   }
-  for (const kan of [...player.chi, ...player.minkan, ...player.ankan]) {
+  for (const kan of player.minkan) {
     mentsu.push({
       type: 'kotsu',
       tileType: kan[0].type,
       tiles: kan.map(tile => tile.num),
     })
+    if (['man', 'so', 'pin'].includes(kan[0].type)) {
+      if ([1, 9].includes(kan[0].num)) {
+        yaku.fu += 16
+      } else {
+        yaku.fu += 8
+      }
+    } else {
+      yaku.fu += 16
+    }
+  }
+  for (const kan of player.ankan) {
+    mentsu.push({
+      type: 'kotsu',
+      tileType: kan[0].type,
+      tiles: kan.map(tile => tile.num),
+    })
+    if (['man', 'so', 'pin'].includes(kan[0].type)) {
+      if ([1, 9].includes(kan[0].num)) {
+        yaku.fu += 32
+      } else {
+        yaku.fu += 16
+      }
+    } else {
+      yaku.fu += 32
+    }
   }
 
   const kotsu = mentsu.filter(mentsu => mentsu.type === 'kotsu')
@@ -489,18 +568,31 @@ export function normalYaku(
   }
 
   // 平和
-  if (player.naki === 0) {
-    const hasYakuhai = toitsu.some(toitsu => {
-      if (toitsu.tileType === 'sangen') {
-        return true
-      }
-      if (toitsu.tileType === 'kaze') {
-        const kaze = kazes[toitsu.tiles[0] - 1]
-        return kaze === round.bakaze || kaze === player.kaze
-      }
-    })
-    if (kotsu.length === 0 && toitsu.length === 1 && !hasYakuhai && ryammen) {
+  let yakuhaiToitsu = false
+  if (toitsu[0].tileType === 'sangen') {
+    yakuhaiToitsu = true
+    yaku.fu += 2
+  } else if (toitsu[0].tileType === 'kaze') {
+    const kaze = kazes[toitsu[0].tiles[0] - 1]
+    if (kaze === round.bakaze) {
+      yakuhaiToitsu = true
+      yaku.fu += 2
+    }
+    if (kaze === player.kaze) {
+      yakuhaiToitsu = true
+      yaku.fu += 2
+    }
+  }
+  if (kotsu.length === 0 && !yakuhaiToitsu && ryammen) {
+    if (player.naki === 0) {
       yaku.pinfu = 1
+      if (tsumo) {
+        // 平和自摸不算自摸的两符
+        yaku.fu -= 2
+      }
+    } else {
+      // 副露平和底符为 30
+      yaku.fu += 10
     }
   }
 
@@ -666,15 +758,62 @@ export function normalYaku(
   }
 
   const kazeKotsu = kotsu.filter(kotsu => kotsu.tileType === 'kaze')
-  const kazeToitsu = toitsu.filter(toitsu => toitsu.tileType === 'kaze')
+  const kazeToitsu = toitsu[0].tileType === 'kaze'
 
   // 小四喜
-  if (kazeKotsu.length === 3 && kazeToitsu.length === 1) {
+  if (kazeKotsu.length === 3 && kazeToitsu) {
     yaku.shosushi = 13
   }
 
   // 大四喜
   if (kazeKotsu.length === 4) {
     yaku.daisushi = 26
+  }
+}
+
+function final(yaku: Yaku, chitoitsu?: boolean): [Yaku, number] {
+  const fu = chitoitsu ? yaku.fu : Math.ceil(yaku.fu / 10) * 10
+  const newYaku: Yaku = { fu, fan: 0 }
+  for (const ykm of yakuman) {
+    if (ykm in yaku) {
+      newYaku[ykm] = 13
+      newYaku.fan += 13
+    }
+  }
+  for (const ykm of doubleyakuman) {
+    if (ykm in yaku) {
+      newYaku[ykm] = 26
+      newYaku.fan += 26
+    }
+  }
+  if (newYaku.fan >= 13) return [newYaku, a(newYaku.fan, fu)]
+  for (const [name, fan] of Object.entries(yaku)) {
+    if (['fu', 'fan'].includes(name)) continue
+    newYaku[name] = fan
+    newYaku.fan += fan
+  }
+  return [newYaku, a(newYaku.fan, fu)]
+}
+
+function a(fan: number, fu: number) {
+  if (fan <= 4) {
+    const a = fu * (2 ** (fan + 2))
+    return a >= 2000 ? 2000 : a
+  }
+  switch (fan) {
+    case 5:
+      return 2000
+    case 6:
+    case 7:
+      return 3000
+    case 8:
+    case 9:
+    case 10:
+      return 4000
+    case 11:
+    case 12:
+      return 6000
+    default:
+      return 8000
   }
 }
