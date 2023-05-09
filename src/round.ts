@@ -62,6 +62,8 @@ export class Round {
   // 上一张被切的牌
   kiru: Tile = null
 
+  chihoRyuukyokuDoubleRiichi = true
+
   constructor (
     // 场风
     public bakaze: Kaze,
@@ -149,7 +151,13 @@ export class Round {
   // TODO: 四风连打
   dahai(tile: Tile, riichi: boolean) {
     // TODO: fix this
-    if (this.kaze === 'ton') this.jun++
+    if (this.kaze === 'ton') {
+      this.jun++
+      // 第一次打牌时没有 kiru, 所以这将会在第二巡开始时执行
+      if (this.kiru) {
+        this.chihoRyuukyokuDoubleRiichi = false
+      }
+    }
     this.player.tiles.splice(this.player.tiles.indexOf(tile), 1)
     tile.from.jun = this.jun
     this.kiru = tile
@@ -165,8 +173,7 @@ export class Round {
           throw new Error('unreachable')
         }
         this.player.riichi = {
-          // TODO: 双立直
-          double: false,
+          double: this.chihoRyuukyokuDoubleRiichi,
           iipatsu: true,
           decomposed: decompose(group(this.player.tiles)),
         }
@@ -193,7 +200,7 @@ export class Round {
     tiles.push(this.kiru)
     player.chi.push(tiles)
     this.mopai(kaze)
-    this.removeIppatsu()
+    this.removeIppatsuChihoRyokyokuDoubleRiichi()
   }
 
   pon(kaze: Kaze, tiles: Tile[]) {
@@ -211,7 +218,7 @@ export class Round {
       chakan: false,
     })
     this.kaze = kaze
-    this.removeIppatsu()
+    this.removeIppatsuChihoRyokyokuDoubleRiichi()
   }
 
   minkan(kaze: Kaze, tiles: Tile[]) {
@@ -228,7 +235,7 @@ export class Round {
 
     this.mopai(kaze)
     this.kanCount++
-    this.removeIppatsu()
+    this.removeIppatsuChihoRyokyokuDoubleRiichi()
   }
 
   ankan(tiles: Tile[]) {
@@ -242,7 +249,7 @@ export class Round {
 
     this.mopai(this.kaze)
     this.kanCount++
-    this.removeIppatsu()
+    this.removeIppatsuChihoRyokyokuDoubleRiichi()
   }
 
   chakan(tile: Tile) {
@@ -256,10 +263,11 @@ export class Round {
 
     this.mopai(this.kaze)
     this.kanCount++
-    this.removeIppatsu()
+    this.removeIppatsuChihoRyokyokuDoubleRiichi()
   }
 
-  removeIppatsu() {
+  removeIppatsuChihoRyokyokuDoubleRiichi() {
+    this.chihoRyuukyokuDoubleRiichi = false
     for (const kaze of kazes) {
       if (this[kaze].riichi) {
         this[kaze].riichi.iipatsu = false

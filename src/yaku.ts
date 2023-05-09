@@ -76,9 +76,11 @@ export interface Yaku {
   // 混一色 (副露减一番)
   honitsu?: 2 | 3
 
+
   // 六番
   // 清一色 (副露减一番)
   chinitsu?: 5 | 6
+
 
   // 役满
   // 天和 (庄家限定)
@@ -117,7 +119,7 @@ export interface Yaku {
 
 type HoraType = 'chitoitsu' | 'kokushimusou' | 'kokushimusou13' | 'normal'
 
-function checkType(round: Round, player: Player, horaTile: Tile): HoraType {
+function checkType(player: Player, horaTile: Tile): HoraType {
   const counts = group(horaTile ? player.tiles.concat(horaTile) : player.tiles)
   const [shanten] = minShanten(decompose(counts), player.naki + player.ankan.length)
   const chitoi = chitoitsuShanten(counts)
@@ -140,7 +142,7 @@ function checkType(round: Round, player: Player, horaTile: Tile): HoraType {
 
 export function yaku(round: Round, player: Player, horaTile: Tile, chankan: boolean) {
   const yaku: Yaku = {}
-  let type = checkType(round, player, horaTile)
+  let type = checkType(player, horaTile)
   let fu = 20
 
   if (!horaTile) {
@@ -149,8 +151,17 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
     // 门前清自摸
     yaku.tsumo = 1
     fu += 10
+    if (round.chihoRyuukyokuDoubleRiichi) {
+      if (player.kaze === 'ton') {
+        yaku.tenho = 13
+      } else {
+        yaku.chiho = 13
+      }
+    }
   }
 
+  const last = horaTile || player.tiles.at(-1)
+  const tilesWithoutLast = horaTile ? player.tiles : player.tiles.slice(0, -1)
   const all = [
     player.tiles, player.chi, player.pon.map(pon => pon.tiles),
     player.minkan, player.ankan, horaTile,
@@ -293,8 +304,42 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
         yaku.honitsu = 2
       }
     }
+
+    // 九莲宝灯
+    // 纯正九莲宝灯
+    if (chinitsu && player.naki === 0) {
+      const counts = group(all)[itsuType]
+      const counts13 = group(tilesWithoutLast)[itsuType]
+      if (counts.every((tile, num) => {
+        if (num === 0 || num === 8) return tile >= 3
+        return num >= 1
+      })) {
+        if (counts13.every((tile, num) => {
+          if (num === 0 || num === 9) return tile === 3
+          return tile === 1
+        })) {
+          yaku.junseikyuurempoto = 26
+        } else {
+          yaku.kyuurempoto = 13
+        }
+      }
+    }
   }
 
+  const tsuiso = all.every(tile => ['kaze', 'sangen'].includes(tile.type))
+  if (tsuiso) {
+    yaku.tsuiso = 13
+  }
+
+  const ryuiso = all.every(tile => {
+    if (tile.type !== 'so' && tile.type !== 'sangen') return false
+    if (tile.type === 'so' && ![2, 3, 4, 6, 8].includes(tile.num)) return false
+    if (tile.type === 'sangen' && tile.num !== 2) return false
+    return true
+  })
+  if (ryuiso) {
+    yaku.ryuiso = 13
+  }
 
   // 与牌型相关的役
   if (type === 'chitoitsu') {
@@ -311,9 +356,7 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
     yaku.kokushimusou13 = 26
   }
   if (type === 'normal') {
-    const last = horaTile || player.tiles.at(-1)
-    const tempai = horaTile ? player.tiles : player.tiles.slice(0, -1)
-    const [, decomposed] = normalShanten(group(tempai), player.naki + player.ankan.length)
+    const [, decomposed] = normalShanten(group(tilesWithoutLast), player.naki + player.ankan.length)
 
     for (const [pai, dec] of decomposed) {
       if (!last.equals(pai)) continue
@@ -506,6 +549,11 @@ export function normalYaku(
   if (player.minkan.length + player.ankan.length === 3) {
     yaku.sankantsu = 2
   }
+  
+  // 四杠子
+  if (player.minkan.length + player.ankan.length === 4) {
+    yaku.sukantsu = 13
+  }
 
   // 对对和
   if (kotsu.length === 4) {
@@ -615,5 +663,18 @@ export function normalYaku(
         break
       }
     }
+  }
+
+  const kazeKotsu = kotsu.filter(kotsu => kotsu.tileType === 'kaze')
+  const kazeToitsu = toitsu.filter(toitsu => toitsu.tileType === 'kaze')
+
+  // 小四喜
+  if (kazeKotsu.length === 3 && kazeToitsu.length === 1) {
+    yaku.shosushi = 13
+  }
+
+  // 大四喜
+  if (kazeKotsu.length === 4) {
+    yaku.daisushi = 26
   }
 }
