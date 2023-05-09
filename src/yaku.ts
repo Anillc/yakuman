@@ -236,8 +236,11 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
   let honroto = true
   // 清老头
   let chinroto = true
+  // 至少应该要有数牌
+  let rotoValid = false
   for (const tile of all) {
     if (['man', 'so', 'pin'].includes(tile.type)) {
+      rotoValid = true
       if (tile.num !== 1 && tile.num !== 9) {
         honroto = false
         chinroto = false
@@ -247,11 +250,51 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
       chinroto = false
     }
   }
-  if (chinroto) {
-    yaku.chinroto = 13
-  } else if (honroto) {
-    yaku.honroto = 2
+  if (rotoValid) {
+    if (chinroto) {
+      yaku.chinroto = 13
+    } else if (honroto) {
+      yaku.honroto = 2
+    }
   }
+
+  // 混一色
+  let honitsu = true
+  // 清一色
+  let chinitsu = true
+  let itsuType: TileType
+  for (const tile of all) {
+    if (['man', 'so', 'pin'].includes(tile.type)) {
+      if (!itsuType) {
+        itsuType = tile.type
+      } else {
+        if (tile.type !== itsuType) {
+          honitsu = false
+          chinitsu = false
+          break
+        }
+      }
+    } else {
+      chinitsu = false
+    }
+  }
+  // 至少要有数牌
+  if (itsuType) {
+    if (player.naki === 0) {
+      if (chinitsu) {
+        yaku.chinitsu = 6
+      } else if (honitsu) {
+        yaku.honitsu = 3
+      }
+    } else {
+      if (chinitsu) {
+        yaku.chinitsu = 5
+      } else if (honitsu) {
+        yaku.honitsu = 2
+      }
+    }
+  }
+
 
   // 与牌型相关的役
   if (type === 'chitoitsu') {
@@ -502,8 +545,11 @@ export function normalYaku(
     let chanta = true
     // 纯全带幺九
     let junchan = true
+    // 至少要有数牌
+    let valid = false
     for (const mt of mentsu) {
       if (['man', 'so', 'pin'].includes(mt.tileType)) {
+        valid = true
         if (!(mt.tiles.includes(1) || mt.tiles.includes(9))) {
           chanta = false
           junchan = false
@@ -513,17 +559,19 @@ export function normalYaku(
         junchan = false
       }
     }
-    if (player.naki === 0) {
-      if (junchan) {
-        yaku.junchan = 3
-      } else if (chanta) {
-        yaku.chanta = 2
-      }
-    } else {
-      if (junchan) {
-        yaku.junchan = 2
-      } else if (chanta) {
-        yaku.chanta = 1
+    if (valid) {
+      if (player.naki === 0) {
+        if (junchan) {
+          yaku.junchan = 3
+        } else if (chanta) {
+          yaku.chanta = 2
+        }
+      } else {
+        if (junchan) {
+          yaku.junchan = 2
+        } else if (chanta) {
+          yaku.chanta = 1
+        }
       }
     }
   }
