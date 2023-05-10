@@ -95,7 +95,7 @@ export class MahjongEnd {
     yaku: Yaku
   }
   ryuukyoku?: {
-    type: '荒牌流局' | '九种九牌' | '四家立直' | '四风连打' | '四开杠'
+    type: '荒牌流局' | '九种九牌' | '四家立直' | '四风连打' | '四杠散了'
     // 荒牌流局
     tempai?: Kaze[]
     // 流局满贯
@@ -216,7 +216,7 @@ export class Mahjong {
         this.end({
           type: 'ryuukyoku',
           ryuukyoku: {
-            type: '四开杠',
+            type: '四杠散了',
           },
         })
         return false
