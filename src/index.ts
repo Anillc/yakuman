@@ -1,7 +1,6 @@
 import { Action, ActionType, Kaze, Player, Round, Tile, kazes } from './round'
-import { shimocha } from './utils'
+import { atamahane, shimocha } from './utils'
 import { Yaku } from './yaku'
-
 
 export class MahjongContext implements Action {
   types: Set<ActionType>
@@ -10,6 +9,7 @@ export class MahjongContext implements Action {
   minkanTiles?: Tile[][]
   ankanTiles?: Tile[][]
   chakanTiles?: Tile[]
+  yaku?: [yaku: Yaku, a: number]
 
   round: Round
 
@@ -93,7 +93,8 @@ export class MahjongEnd {
   hora?: {
     kaze: Kaze
     yaku: Yaku
-  }
+    score: number
+  }[]
   ryuukyoku?: {
     type: '荒牌流局' | '九种九牌' | '四家立直' | '四风连打' | '四杠散了'
     // 荒牌流局
@@ -109,6 +110,8 @@ export class Mahjong {
   round: Round
   kaze: Kaze = 'ton'
   num = 0
+  score = [2500, 2500, 2500, 2500]
+  homba = 0
 
   constructor(
     public callback: (ctxs: { [k in Kaze]?: MahjongContext }, cancel: () => void) => void,
@@ -131,6 +134,75 @@ export class Mahjong {
         this.mopai()
       }
     }
+  }
+
+  ron(ctxs: MahjongContext[]) {
+    if (!ctxs.every(ctx => ctx.types.has('ron'))) throw new Error('unreachable')
+    let head = this.round.kiru.from.kaze
+    while (!ctxs.find(ctx => ctx.player.kaze === head)) {
+      head = atamahane(head)
+    }
+    const furikomi = this.index(this.round.kiru.from.kaze)
+    const hora: MahjongEnd['hora'] = []
+    for (const ctx of ctxs) {
+      const oya = this.round.bakaze === ctx.player.kaze
+      let score = Math.ceil((oya ? 6 * ctx.yaku[1] : 4 * ctx.yaku[1]) / 100) * 100
+      this.score[furikomi] -= score
+      if (head === ctx.player.kaze) {
+        // 供托
+        const kyotaku = this.homba * 300 + kazes.filter(kaze => this.round[kaze].riichi).length * 1000
+        score += kyotaku
+        this.score[furikomi] -= kyotaku
+      }
+      hora.push({
+        kaze: ctx.player.kaze,
+        yaku: ctx.yaku[0],
+        score,
+      })
+      this.score[ctx.player.kaze] += score
+    }
+    this.end({
+      type: 'hora',
+      hora,
+    })
+  }
+
+  tsumo(ctx: MahjongContext) {
+    if (!ctx.types.has('ron')) throw new Error('unreachable')
+    const oya = this.round.bakaze === ctx.player.kaze
+    let score = Math.ceil((oya ? 6 * ctx.yaku[1] : 4 * ctx.yaku[1]) / 100) * 100
+    for (const kaze of kazes) {
+      if (this.round[kaze].riichi) {
+        // 自家的立直棒将会在后面加回来
+        this.score[this.index(kaze)] -= 1000
+      }
+      if (kaze === ctx.player.kaze) continue
+      if (kaze === this.round.bakaze) {
+        // 自家为庄家，不会进入这里
+        if (oya) throw new Error('unreachable')
+        // 自家为闲家，庄家支付 2a
+        this.score[this.index(kaze)] -= 2 * score / 4 + 100 * this.homba
+      } else {
+        if (oya) {
+          // 自家为庄家，闲家支付 2a
+          this.score[this.index(kaze)] -= 2 * score / 4 + 100 * this.homba
+        } else {
+          // 自家为闲家，闲家支付 a
+          this.score[this.index(kaze)] -= score / 4 + 100 * this.homba
+        }
+      }
+    }
+    // 供托
+    score += this.homba * 300 + kazes.filter(kaze => this.round[kaze].riichi).length * 1000
+    this.score[ctx.player.kaze] += score
+    this.end({
+      type: 'hora',
+      hora: [{
+        kaze: ctx.player.kaze,
+        yaku: ctx.yaku[0],
+        score,
+      }],
+    })
   }
 
   mopai(keepJun?: boolean, kaze?: Kaze) {

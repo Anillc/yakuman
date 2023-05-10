@@ -142,6 +142,20 @@ export function shimocha(kaze: Kaze): Kaze {
   }
 }
 
+// 头跳
+export function atamahane(kaze: Kaze): Kaze {
+  switch (kaze) {
+    case 'ton':
+      return 'pei'
+    case 'nan':
+      return 'ton'
+    case 'sha':
+      return 'nan'
+    case 'pei':
+      return 'sha'
+  }
+}
+
 export function arrayEquals<T>(a: T[], b: T[]) {
   if (a === b) return true
   if (a.length !== b.length) return false

@@ -1,6 +1,6 @@
 import { Decomposed, decompose, shanten } from './tempai'
 import { Pai, comparePai, createEmptyCounts, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
-import { canHora, yaku } from './yaku'
+import { Yaku, canHora, yaku } from './yaku'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 export const kazes: Kaze[] = ['ton', 'nan', 'sha', 'pei']
@@ -38,7 +38,7 @@ export class Tile implements Pai {
 
 export type ActionType = 
   | 'chi' | 'pon' | 'kan' | 'riichi' | 'ryuukyoku'
-  | 'tsumo' | 'ron' | 'chankan' | 'dapai' | 'cancel'
+  | 'tsumo' | 'ron' | 'dapai' | 'cancel'
 export interface Action {
   types: Set<ActionType>
   chiTiles?:    Tile[][]
@@ -46,6 +46,7 @@ export interface Action {
   minkanTiles?: Tile[][]
   ankanTiles?:  Tile[][]
   chakanTiles?: Tile[]
+  yaku?:        [yaku: Yaku, a: number]
 }
 
 export class Round {
@@ -154,6 +155,7 @@ export class Round {
     const shanten = this.player.calcShanten14()
     const tempai = shanten.filter(([, shanten]) => shanten === 0)
     if (tempai.length !== 0) {
+      // 可以保存 yaku 以提示是否有役
       this.player.tempai14 = tempai.map(tempai => [tempai[0], tempai[2]])
       return true
     }
@@ -381,10 +383,11 @@ export class Round {
           action.types.add('riichi')
         }
         for (const [kiru, tp] of this.player.tempai14) {
-          const pai = tp.find(pai => comparePai(kiru, pai) === 0)
-          if (pai) {
-            const yk = yaku(this, this.player, pai, true, false)
+          const hora = tp.some(pai => comparePai(kiru, pai) === 0)
+          if (hora) {
+            const yk = yaku(this, this.player, null, true, false)
             if (canHora(yk[0])) {
+              action.yaku = yk
               action.types.add('tsumo')
               break
             }
@@ -400,14 +403,16 @@ export class Round {
       const tempai = this[kaze].tempai13
       let pai: Pai
       if (tempai && (pai = tempai.find(pai => this.kiru.equals(pai)))) {
-        const yk = yaku(this, this.player, pai, true, false)
+        const yk = yaku(this, this.player, this.kiru, false, chankan)
         if (canHora(yk[0]) && !this[kaze].furiten) {
           if (chankan) {
             // 抢杠和国士无双抢暗杠
             if (!ankan || (ankan && (yk[0].kokushimusou || yk[0].kokushimusou13))) {
-              action.types.add('chankan')
+              action.yaku = yk
+              action.types.add('ron')
             }
           } else {
+            action.yaku = yk
             action.types.add('ron')
           }
         } else {
