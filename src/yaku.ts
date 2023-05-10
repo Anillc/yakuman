@@ -156,7 +156,7 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
     // 门前清自摸
     yaku.tsumo = 1
     yaku.fu += 2
-    if (round.chihoRyuukyokuDoubleRiichi) {
+    if (round.chihoRyuukyokuDoubleRiichiSufurenda) {
       if (player.kaze === 'ton') {
         yaku.tenho = 13
       } else {

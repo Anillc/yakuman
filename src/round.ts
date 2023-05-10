@@ -62,7 +62,7 @@ export class Round {
   // 上一张被切的牌
   kiru: Tile = null
 
-  chihoRyuukyokuDoubleRiichi = true
+  chihoRyuukyokuDoubleRiichiSufurenda = true
 
   constructor (
     // 场风
@@ -132,12 +132,19 @@ export class Round {
 
   // 如果没有提供 kaze 参数，则切换到下家并摸牌
   // 返回 true 则为听牌
-  mopai(kaze?: Kaze): boolean {
+  mopai(keepJun?: boolean, kaze?: Kaze): boolean {
     kaze ||= shimocha(this.kaze)
     const tile = this.haiyama.shift()
     tile.from.kaze = kaze
     this[kaze].tiles.push(tile)
     this.kaze = kaze
+    // 只有摸到并打出去才能算下一巡
+    // 碰里面没有摸牌，故不会增加巡数
+    if (!keepJun && kaze === 'ton') {
+      this.jun++
+      // 亲家一巡不会摸牌，故将会在第二巡破坏状态
+      this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
+    }
     const shanten = this.player.calcShanten14()
     const tempai = shanten.filter(([, shanten]) => shanten === 0)
     if (tempai.length !== 0) {
@@ -150,14 +157,6 @@ export class Round {
   // 打牌
   // TODO: 四风连打
   dahai(tile: Tile, riichi: boolean) {
-    // TODO: fix this
-    if (this.kaze === 'ton') {
-      this.jun++
-      // 第一次打牌时没有 kiru, 所以这将会在第二巡开始时执行
-      if (this.kiru) {
-        this.chihoRyuukyokuDoubleRiichi = false
-      }
-    }
     this.player.tiles.splice(this.player.tiles.indexOf(tile), 1)
     tile.from.jun = this.jun
     this.kiru = tile
@@ -173,7 +172,7 @@ export class Round {
           throw new Error('unreachable')
         }
         this.player.riichi = {
-          double: this.chihoRyuukyokuDoubleRiichi,
+          double: this.chihoRyuukyokuDoubleRiichiSufurenda,
           iipatsu: true,
           decomposed: decompose(group(this.player.tiles)),
         }
@@ -199,8 +198,8 @@ export class Round {
     this.player.ho.pop()
     tiles.push(this.kiru)
     player.chi.push(tiles)
-    this.mopai(kaze)
-    this.removeIppatsuChihoRyokyokuDoubleRiichi()
+    this.mopai(false, kaze)
+    this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
   }
 
   pon(kaze: Kaze, tiles: Tile[]) {
@@ -218,7 +217,7 @@ export class Round {
       chakan: false,
     })
     this.kaze = kaze
-    this.removeIppatsuChihoRyokyokuDoubleRiichi()
+    this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
   }
 
   minkan(kaze: Kaze, tiles: Tile[]) {
@@ -233,9 +232,9 @@ export class Round {
     tiles.push(this.kiru)
     player.minkan.push(tiles)
 
-    this.mopai(kaze)
+    this.mopai(true, kaze)
     this.kanCount++
-    this.removeIppatsuChihoRyokyokuDoubleRiichi()
+    this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
   }
 
   ankan(tiles: Tile[]) {
@@ -247,9 +246,9 @@ export class Round {
     }
     this.player.ankan.push(tiles)
 
-    this.mopai(this.kaze)
+    this.mopai(true, this.kaze)
     this.kanCount++
-    this.removeIppatsuChihoRyokyokuDoubleRiichi()
+    this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
   }
 
   chakan(tile: Tile) {
@@ -261,13 +260,13 @@ export class Round {
       }
     }
 
-    this.mopai(this.kaze)
+    this.mopai(true, this.kaze)
     this.kanCount++
-    this.removeIppatsuChihoRyokyokuDoubleRiichi()
+    this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
   }
 
-  removeIppatsuChihoRyokyokuDoubleRiichi() {
-    this.chihoRyuukyokuDoubleRiichi = false
+  removeIppatsuChihoRyokyokuDoubleRiichiSufurenda() {
+    this.chihoRyuukyokuDoubleRiichiSufurenda = false
     for (const kaze of kazes) {
       if (this[kaze].riichi) {
         this[kaze].riichi.iipatsu = false
