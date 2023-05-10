@@ -1,8 +1,8 @@
 import { Action, ActionType, Kaze, Player, Round, Tile, kazes } from './round'
 import { shimocha } from './utils'
+import { Yaku } from './yaku'
 
 
-// TODO: 流局
 export class MahjongContext implements Action {
   types: Set<ActionType>
   chiTiles?: Tile[][]
@@ -24,8 +24,30 @@ export class MahjongContext implements Action {
   }
 
   dahai(tile: Tile, riichi?: boolean) {
+    if (tile !== this.player.tiles.at(-1)) {
+      throw new Error('unreachable')
+    }
     this.round.dahai(tile, riichi)
-    this.mahjong.naki()
+    if (riichi) {
+      const ryuukyoku = kazes.every(kaze => this.round[kaze].riichi)
+      if (ryuukyoku) {
+        this.mahjong.end({
+          type: 'ryuukyoku',
+          ryuukyoku: {
+            type: '四家立直',
+          },
+        })
+      }
+    } else if (this.round.sufurenda === true) {
+      this.mahjong.end({
+        type: 'ryuukyoku',
+        ryuukyoku: {
+          type: '四风连打',
+        },
+      })
+    } else {
+      this.mahjong.naki()
+    }
   }
 
   // 吃、杠会摸牌，则不需要再调用 mopai
@@ -45,15 +67,41 @@ export class MahjongContext implements Action {
   }
 
   ankan(tiles: Tile[]) {
-    // TODO: 国士无双
     this.round.ankan(tiles)
-    this.mahjong.next()
+    this.mahjong.naki(true, true)
   }
 
   chakan(tile: Tile) {
-    // TODO: 抢杠
     this.round.chakan(tile)
-    this.mahjong.next()
+    this.mahjong.naki(true)
+  }
+
+  // 九种九牌
+  ryuukyoku() {
+    this.mahjong.end({
+      type: 'ryuukyoku',
+      ryuukyoku: {
+        type: '九种九牌',
+        kaze: this.player.kaze,
+      },
+    })
+  }
+}
+
+export class MahjongEnd {
+  type: 'hora' | 'ryuukyoku'
+  hora?: {
+    kaze: Kaze
+    yaku: Yaku
+  }
+  ryuukyoku?: {
+    type: '荒牌流局' | '九种九牌' | '四家立直' | '四风连打' | '四开杠'
+    // 荒牌流局
+    tempai?: Kaze[]
+    // 流局满贯
+    mangan?: Kaze[]
+    // 九种九牌
+    kaze?: Kaze
   }
 }
 
@@ -63,7 +111,8 @@ export class Mahjong {
   num = 0
 
   constructor(
-    public callback: (ctxs: { [k in Kaze]?: MahjongContext }, cancel: () => void) => void
+    public callback: (ctxs: { [k in Kaze]?: MahjongContext }, cancel: () => void) => void,
+    public end: (end: MahjongEnd) => void,
   ) {
     this.createRound()
     this.next()
@@ -73,20 +122,30 @@ export class Mahjong {
   // 几家都取消后才调用 cancel
   cancel(ctxs: { [k in Kaze]?: MahjongContext }) {
     return () => {
-      const ron = Object.values(ctxs).filter(ctx => ctx.types.has('ron'))
-      for (const ctx of ron) {
-        this.round.minogashi(ctx.player.kaze)
+      // 检查四杠散了
+      if (this.checkKan()) {
+        const ron = Object.values(ctxs).filter(ctx => ctx.types.has('ron'))
+        for (const ctx of ron) {
+          this.round.minogashi(ctx.player.kaze)
+        }
+        this.mopai()
       }
-      this.mopai()
     }
   }
 
-  mopai() {
+  mopai(keepJun?: boolean, kaze?: Kaze) {
     if (this.round.rest === 0) {
-      // TODO: 荒牌流局
+      this.end({
+        type: 'ryuukyoku',
+        ryuukyoku: {
+          type: '荒牌流局',
+          tempai: kazes.filter(kaze => this.round[kaze].tempai13),
+          mangan: kazes.filter(kaze => this.round[kaze].ryuukyokumangan),
+        },
+      })
       return
     }
-    this.round.mopai()
+    this.round.mopai(keepJun, kaze)
     this.next()
   }
 
@@ -103,22 +162,26 @@ export class Mahjong {
 
   // 打出牌后调用此函数检查别的几家有没有按钮
   // 检查荒牌流局
-  naki() {
+  naki(kan?: boolean, ankan?: boolean) {
     const kaze = kazes.filter(kaze => kaze !== this.round.kaze)
     const ctxs: { [k in Kaze]?: MahjongContext } = {}
     for (const k of kaze) {
-      const action = this.round.action(k)
+      const action = this.round.action(k, kan, ankan)
       if (!action) continue
       ctxs[k] = new MahjongContext(this, this.index(k), this.round[k], action)
     }
     if (Object.values(ctxs).length === 0) {
-      this.mopai()
+      if (this.checkKan()) {
+        if (kan) {
+          this.mopai(true, this.round.kaze)
+        } else {
+          this.mopai()
+        }
+      }
     } else {
       this.callback(ctxs, this.cancel(ctxs))
     }
   }
-
-  // TODO: kanNaki
 
   createRound() {
     this.nextKaze()
@@ -138,5 +201,27 @@ export class Mahjong {
 
   index(kaze: Kaze) {
     return (kazes.indexOf(kaze) + this.num - 1) % 4
+  }
+
+  // 如果没有流局，则返回 true
+  private checkKan(): boolean {
+    if (this.round.kanCount === 4) {
+      // 如果某一家有四杠，那么九不需要流局
+      const ryuukyoku = !kazes.some(kaze => {
+        const ankan = this.round[kaze].ankan.length
+        const minkan = this.round[kaze].minkan.length
+        return ankan + minkan === 4
+      })
+      if (ryuukyoku) {
+        this.end({
+          type: 'ryuukyoku',
+          ryuukyoku: {
+            type: '四开杠',
+          },
+        })
+        return false
+      }
+    }
+    return true
   }
 }

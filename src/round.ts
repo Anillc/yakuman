@@ -1,5 +1,5 @@
 import { Decomposed, decompose, shanten } from './tempai'
-import { Counts, Pai, comparePai, createEmptyCounts, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
+import { Pai, comparePai, createEmptyCounts, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
 import { canHora, yaku } from './yaku'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
@@ -38,7 +38,7 @@ export class Tile implements Pai {
 
 export type ActionType = 
   | 'chi' | 'pon' | 'kan' | 'riichi' | 'ryuukyoku'
-  | 'tsumo' | 'ron' | 'dapai' | 'cancel'
+  | 'tsumo' | 'ron' | 'chankan' | 'dapai' | 'cancel'
 export interface Action {
   types: Set<ActionType>
   chiTiles?:    Tile[][]
@@ -64,6 +64,11 @@ export class Round {
   kiru: Tile = null
 
   chihoRyuukyokuDoubleRiichiSufurenda = true
+  // null -> 还没有打牌
+  // Pai -> 已经被打的风牌
+  // false -> 没有四风连打
+  // true -> 四风连打
+  sufurenda: Pai | boolean = null
 
   constructor (
     // 场风
@@ -156,7 +161,6 @@ export class Round {
   }
 
   // 打牌
-  // TODO: 四风连打
   dahai(tile: Tile, riichi: boolean) {
     this.player.tiles.splice(this.player.tiles.indexOf(tile), 1)
     tile.from.jun = this.jun
@@ -168,6 +172,27 @@ export class Round {
     }
     if (this.player.dojunfuriten) {
       this.player.dojunfuriten = false
+    }
+    const roto = ['man', 'so', 'pin'].includes(tile.type) && (tile.num === 1 || tile.num === 9)
+    const jihai = ['kaze', 'sangen'].includes(tile.type)
+    if (!roto || !jihai) {
+      this.player.ryuukyokumangan = false
+    }
+    if (this.chihoRyuukyokuDoubleRiichiSufurenda) {
+      if (this.sufurenda === null) {
+        if (tile.type === 'kaze') {
+          this.sufurenda = tile
+        } else {
+          this.sufurenda = false
+        }
+      } else if (typeof this.sufurenda !== 'boolean') {
+        if (comparePai(this.sufurenda, tile) !== 0) {
+          this.sufurenda = false
+        }
+      }
+      if (this.sufurenda && this.kaze === 'pei') {
+        this.sufurenda = true
+      }
     }
     if (this.player.tempai14) {
       this.player.tempai13 = this.player.tempai14.find(([tempai]) => tile.equals(tempai))?.[1]
@@ -205,6 +230,7 @@ export class Round {
     player.chi.push(tiles)
     this.kaze = kaze
     this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
+    this.removeRyuukyokuMangan(this.kiru.from.kaze)
   }
 
   pon(kaze: Kaze, tiles: Tile[]) {
@@ -223,6 +249,7 @@ export class Round {
     })
     this.kaze = kaze
     this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
+    this.removeRyuukyokuMangan(this.kiru.from.kaze)
   }
 
   minkan(kaze: Kaze, tiles: Tile[]) {
@@ -240,8 +267,10 @@ export class Round {
     this.mopai(true, kaze)
     this.kanCount++
     this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
+    this.removeRyuukyokuMangan(this.kiru.from.kaze)
   }
 
+  // 暗杠与加杠的摸牌在 Mahjong 类里，因为如果被荣和则杠不成立
   ankan(tiles: Tile[]) {
     tiles = [...tiles]
     for (const tile of tiles) {
@@ -250,8 +279,7 @@ export class Round {
       this.player.tiles.splice(index, 1)
     }
     this.player.ankan.push(tiles)
-
-    this.mopai(true, this.kaze)
+    this.kiru = tiles[0]
     this.kanCount++
     this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
   }
@@ -264,8 +292,7 @@ export class Round {
         pon.chakan = true
       }
     }
-
-    this.mopai(true, this.kaze)
+    this.kiru = tile
     this.kanCount++
     this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
   }
@@ -278,11 +305,16 @@ export class Round {
 
   removeIppatsuChihoRyokyokuDoubleRiichiSufurenda() {
     this.chihoRyuukyokuDoubleRiichiSufurenda = false
+    this.sufurenda = false
     for (const kaze of kazes) {
       if (this[kaze].riichi) {
         this[kaze].riichi.iipatsu = false
       }
     }
+  }
+
+  removeRyuukyokuMangan(kaze: Kaze) {
+    this[kaze].ryuukyokumangan = false
   }
 
   tileRest(kaze: Kaze, type: TileType, num: number) {
@@ -313,15 +345,26 @@ export class Round {
   // this.kiru.from.kaze === this.kaze => 自家刚打完牌
   // this.kiru.from.kaze !== this.kaze => 等待自家打牌
   // 返回 null 则为不需要操作
-  action(kaze: Kaze): Action {
+  action(kaze: Kaze, chankan?: boolean, ankan?: boolean): Action {
     // 是否已经摸牌
-    // TODO: 九种九牌
     const mopai = this.kiru.from.kaze !== this.kaze
     if (mopai) {
       if (kaze !== this.kaze) return null
       const action: Action = { types: new Set() }
+      if (this.chihoRyuukyokuDoubleRiichiSufurenda) {
+        const counts = group(this[kaze].tiles)
+        const yaochu = [
+          counts['man'][0], counts['man'][8],
+          counts['so'][0], counts['so'][8],
+          counts['pin'][0], counts['pin'][8],
+          ...counts['kaze'], ...counts['sangen'],
+        ].filter(tile => tile >= 1)
+        if (yaochu.length >= 9) {
+          action.types.add('ryuukyoku')
+        }
+      }
       // 最后一张牌的时候没有杠
-      if (this.rest !== 0) {
+      if (this.rest !== 0 && this.kanCount < 4) {
         const ankan = this.player.ankanTiles
         if (ankan.length !== 0) {
           action.types.add('kan')
@@ -359,7 +402,14 @@ export class Round {
       if (tempai && (pai = tempai.find(pai => this.kiru.equals(pai)))) {
         const yk = yaku(this, this.player, pai, true, false)
         if (canHora(yk[0]) && !this[kaze].furiten) {
-          action.types.add('ron')
+          if (chankan) {
+            // 抢杠和国士无双抢暗杠
+            if (!ankan || (ankan && (yk[0].kokushimusou || yk[0].kokushimusou13))) {
+              action.types.add('chankan')
+            }
+          } else {
+            action.types.add('ron')
+          }
         } else {
           // 和不了，振听
           this.minogashi(kaze)
@@ -372,7 +422,7 @@ export class Round {
           action.ponTiles = pon
         }
         const minkan = this[kaze].minkanTiles
-        if (minkan.length !== 0) {
+        if (minkan.length !== 0 && this.kanCount < 4) {
           action.types.add('kan')
           action.minkanTiles = minkan
         }
@@ -423,6 +473,8 @@ export class Player {
   dojunfuriten = false
   // 已切的牌，用于计算舍张振听
   kiru = createEmptyCounts()
+
+  ryuukyokumangan = true
 
   constructor(
     public round: Round,
