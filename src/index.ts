@@ -55,12 +55,6 @@ export class MahjongContext implements Action {
     this.round.chakan(tile)
     this.mahjong.next()
   }
-
-  // 取消吃、碰、杠
-  // 几家都取消后才调用 cancel
-  cancel() {
-    this.mahjong.mopai()
-  }
 }
 
 export class Mahjong {
@@ -69,10 +63,22 @@ export class Mahjong {
   num = 0
 
   constructor(
-    public callback: (ctxs: { [k in Kaze]?: MahjongContext }) => void
+    public callback: (ctxs: { [k in Kaze]?: MahjongContext }, cancel: () => void) => void
   ) {
     this.createRound()
     this.next()
+  }
+
+  // 取消吃、碰、杠、和
+  // 几家都取消后才调用 cancel
+  cancel(ctxs: { [k in Kaze]?: MahjongContext }) {
+    return () => {
+      const ron = Object.values(ctxs).filter(ctx => ctx.types.has('ron'))
+      for (const ctx of ron) {
+        this.round.minogashi(ctx.player.kaze)
+      }
+      this.mopai()
+    }
   }
 
   mopai() {
@@ -89,9 +95,10 @@ export class Mahjong {
     const kaze = this.round.kaze
     const action = this.round.action(kaze)
     if (!action) throw new Error('unreachable')
-    this.callback({
+    const ctxs = {
       [kaze]: new MahjongContext(this, this.index(kaze), this.round.player, action),
-    })
+    }
+    this.callback(ctxs, this.cancel(ctxs))
   }
 
   // 打出牌后调用此函数检查别的几家有没有按钮
@@ -107,7 +114,7 @@ export class Mahjong {
     if (Object.values(ctxs).length === 0) {
       this.mopai()
     } else {
-      this.callback(ctxs)
+      this.callback(ctxs, this.cancel(ctxs))
     }
   }
 

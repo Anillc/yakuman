@@ -165,6 +165,9 @@ export class Round {
     if (this.player.riichi) {
       this.player.riichi.iipatsu = false
     }
+    if (this.player.dojunfuriten) {
+      this.player.dojunfuriten = false
+    }
     if (this.player.tempai14) {
       // TODO: 计算振听
       this.player.tempai13 = this.player.tempai14.find(([tempai]) => tile.equals(tempai))?.[1]
@@ -200,7 +203,7 @@ export class Round {
     this.player.ho.pop()
     tiles.push(this.kiru)
     player.chi.push(tiles)
-    this.mopai(false, kaze)
+    this.kaze = kaze
     this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
   }
 
@@ -265,6 +268,12 @@ export class Round {
     this.mopai(true, this.kaze)
     this.kanCount++
     this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
+  }
+
+  // 见逃
+  minogashi(kaze: Kaze) {
+    const player = this[kaze]
+    player.dojunfuriten = true
   }
 
   removeIppatsuChihoRyokyokuDoubleRiichiSufurenda() {
@@ -351,8 +360,10 @@ export class Round {
         const yk = yaku(this, this.player, pai, true, false)
         if (canHora(yk[0])) {
           action.types.add('ron')
+        } else {
+          // 和不了，振听
+          this.minogashi(kaze)
         }
-        // TODO: 振听
       }
       if (this.rest !== 0) {
         const pon = this[kaze].ponTiles
@@ -408,6 +419,8 @@ export class Player {
   tempai13: Pai[]
   // 摸牌时设置，打牌时清除
   tempai14: [Pai, Pai[]][]
+
+  dojunfuriten = false
 
   constructor(
     public round: Round,
