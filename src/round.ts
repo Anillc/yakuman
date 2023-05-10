@@ -1,5 +1,5 @@
 import { Decomposed, decompose, shanten } from './tempai'
-import { Pai, comparePai, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
+import { Counts, Pai, comparePai, createEmptyCounts, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
 import { canHora, yaku } from './yaku'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
@@ -162,6 +162,7 @@ export class Round {
     tile.from.jun = this.jun
     this.kiru = tile
     this.player.ho.push(tile)
+    this.player.kiru[tile.type][tile.num - 1]++
     if (this.player.riichi) {
       this.player.riichi.iipatsu = false
     }
@@ -169,7 +170,6 @@ export class Round {
       this.player.dojunfuriten = false
     }
     if (this.player.tempai14) {
-      // TODO: 计算振听
       this.player.tempai13 = this.player.tempai14.find(([tempai]) => tile.equals(tempai))?.[1]
       if (riichi) {
         if (!this.player.tempai13 || this.player.naki !== 0) {
@@ -358,7 +358,7 @@ export class Round {
       let pai: Pai
       if (tempai && (pai = tempai.find(pai => this.kiru.equals(pai)))) {
         const yk = yaku(this, this.player, pai, true, false)
-        if (canHora(yk[0])) {
+        if (canHora(yk[0]) && !this[kaze].furiten) {
           action.types.add('ron')
         } else {
           // 和不了，振听
@@ -421,6 +421,8 @@ export class Player {
   tempai14: [Pai, Pai[]][]
 
   dojunfuriten = false
+  // 已切的牌，用于计算舍张振听
+  kiru = createEmptyCounts()
 
   constructor(
     public round: Round,
@@ -517,5 +519,10 @@ export class Player {
       if (tile) result.push(tile)
     }
     return result
+  }
+  // 舍张振听/立直振听
+  get furiten() {
+    if (!this.tempai13) return false
+    return this.tempai13.some(tempai => this.kiru[tempai.type][tempai.num - 1] > 0)
   }
 }
