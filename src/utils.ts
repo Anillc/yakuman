@@ -25,7 +25,7 @@ export function cloneCounts(count: Counts) {
   return structuredClone(count)
 }
 
-export function group(tiles: Tile[]) {
+export function group(tiles: Pai[]) {
   return tiles.reduce((acc, x) => {
     acc[x.type][x.num - 1]++
     return acc

@@ -1,6 +1,6 @@
 import { Player, Round, Tile, TileType, kazes, sangens } from './round'
 import { Block, Decomposed, chitoitsuShanten, decompose, kokushimusouShanten, minShanten, normalShanten } from './tempai'
-import { Pai, arrayEquals, group } from './utils'
+import { Pai, arrayEquals, comparePai, group } from './utils'
 
 export interface Yaku {
   fu: number
@@ -125,8 +125,8 @@ export const doubleyakuman = ['suankotanki', 'kokushimusou13', 'junseikyuurempot
 
 type HoraType = 'chitoitsu' | 'kokushimusou' | 'kokushimusou13' | 'normal'
 
-function checkType(player: Player, horaTile: Tile): HoraType {
-  const counts = group(horaTile ? player.tiles.concat(horaTile) : player.tiles)
+function checkType(player: Player, tiles: Pai[]): HoraType {
+  const counts = group(tiles)
   const [shanten] = minShanten(decompose(counts), player.naki + player.ankan.length)
   const chitoi = chitoitsuShanten(counts)
   const kokushi = kokushimusouShanten(counts)
@@ -145,14 +145,17 @@ function checkType(player: Player, horaTile: Tile): HoraType {
   }
 }
 
-
-export function yaku(round: Round, player: Player, horaTile: Tile, chankan: boolean) {
+export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, chankan: boolean) {
   const yaku: Yaku = { fu: 20, fan: 0 }
-  let type = checkType(player, horaTile)
+  const tiles: Pai[] = [...player.tiles]
+  if (!last) {
+    last = tiles.pop()
+  }
+  let type = checkType(player, tiles.concat(last))
 
-  if (horaTile) {
+  if (!tsumo) {
     yaku.fu += 10
-  } else if (!horaTile && player.naki === 0) {
+  } else if (tsumo && player.naki === 0) {
     // 门前清自摸
     yaku.tsumo = 1
     yaku.fu += 2
@@ -165,11 +168,9 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
     }
   }
 
-  const last = horaTile || player.tiles.at(-1)
-  const tilesWithoutLast = horaTile ? player.tiles : player.tiles.slice(0, -1)
-  const all = [
-    player.tiles, player.chi, player.pon.map(pon => pon.tiles),
-    player.minkan, player.ankan, horaTile,
+  const all: Pai[] = [
+    tiles, player.chi, player.pon.map(pon => pon.tiles),
+    player.minkan, player.ankan, last,
   ].flat(2)
 
   // 断幺九
@@ -196,7 +197,7 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
   }
 
   if (round.rest === 0) {
-    if (horaTile) {
+    if (tsumo) {
       // 河底
       yaku.hotei = 1
     } else {
@@ -219,7 +220,7 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
   yaku.dora = 0
   for (const d of dora) {
     for (const tile of all) {
-      if (tile.equals(d)) yaku.dora++
+      if (comparePai(tile, d) === 0) yaku.dora++
     }
   }
   // 里宝牌
@@ -236,13 +237,13 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
     yaku.uradora = 0
     for (const d of uradora) {
       for (const tile of all) {
-        if (tile.equals(d)) yaku.dora++
+        if (comparePai(tile, d) === 0) yaku.dora++
       }
     }
   }
   // 红宝牌
   for (const tile of all) {
-    if (tile.red) {
+    if (tile instanceof Tile && tile.red) {
       yaku.reddora ||= 0
       yaku.reddora++
     }
@@ -314,7 +315,7 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
     // 纯正九莲宝灯
     if (chinitsu && player.naki === 0) {
       const counts = group(all)[itsuType]
-      const counts13 = group(tilesWithoutLast)[itsuType]
+      const counts13 = group(tiles)[itsuType]
       if (counts.every((tile, num) => {
         if (num === 0 || num === 8) return tile >= 3
         return num >= 1
@@ -363,15 +364,15 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
     yaku.fu = 25
   }
   if (type === 'normal') {
-    const [, decomposed] = normalShanten(group(tilesWithoutLast), player.naki + player.ankan.length)
+    const [, decomposed] = normalShanten(group(tiles), player.naki + player.ankan.length)
 
     const yakus: Yaku[] = []
     for (const [pai, decs] of decomposed) {
-      if (!last.equals(pai)) continue
+      if (comparePai(last, pai) !== 0) continue
       for (const dec of decs) {
         const y = { ...yaku }
         yakus.push(y)
-        normalYaku(round, player, yaku, dec, last, !!horaTile)
+        normalYaku(round, player, yaku, dec, last, tsumo)
       }
     }
     return yakus.map(yaku => final(yaku)).reduce((acc, x) => acc[1] > x[1] ? x : acc, [null, -Infinity])
@@ -382,7 +383,7 @@ export function yaku(round: Round, player: Player, horaTile: Tile, chankan: bool
 
 export function normalYaku(
   round: Round, player: Player, yaku: Yaku,
-  decomposed: Decomposed, last: Tile, tsumo: boolean,
+  decomposed: Decomposed, last: Pai, tsumo: boolean,
 ) {
   // 立直
   if (player.riichi) {
@@ -458,7 +459,7 @@ export function normalYaku(
   }
 
   if (mentsu.length === 3 && toitsu.length === 2) {
-    const kotsuIndex = toitsu.findIndex(toitsu => last.equals(toitsu.tileType, toitsu.tiles[0]))
+    const kotsuIndex = toitsu.findIndex(toitsu => comparePai(last, { type: toitsu.tileType, num: toitsu.tiles[0] }))
     if (kotsuIndex === -1) throw new Error('unreachable')
     const kotsu = toitsu.splice(kotsuIndex, 1)[0]
     mentsu.push({
@@ -564,7 +565,6 @@ export function normalYaku(
     if (block.tileType === 'sangen') {
       yaku[sangens[block.tiles[0] - 1]] = 1
     }
-    // TODO: 算符
   }
 
   // 平和

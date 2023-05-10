@@ -9,7 +9,7 @@ export const sangens: Sangen[] = ['white', 'green', 'red']
 
 export type TileType = 'pin' | 'so' | 'man' | 'kaze' | 'sangen'
 
-export class Tile {
+export class Tile implements Pai {
   riichi = false
   from: {
     // 巡
@@ -171,6 +171,7 @@ export class Round {
         if (!this.player.tempai13 || this.player.naki !== 0) {
           throw new Error('unreachable')
         }
+        tile.riichi = true
         this.player.riichi = {
           double: this.chihoRyuukyokuDoubleRiichiSufurenda,
           iipatsu: true,
