@@ -381,7 +381,7 @@ export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, ch
   }
 }
 
-export function normalYaku(
+function normalYaku(
   round: Round, player: Player, yaku: Yaku,
   decomposed: Decomposed, last: Pai, tsumo: boolean,
 ) {
@@ -816,4 +816,11 @@ function a(fan: number, fu: number) {
     default:
       return 8000
   }
+}
+
+export function canHora(yaku: Yaku) {
+  const dora = yaku.dora || 0
+  const reddora = yaku.reddora || 0
+  const uradora = yaku.uradora || 0
+  return yaku.fan - dora - reddora - uradora > 0
 }

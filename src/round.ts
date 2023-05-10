@@ -1,5 +1,6 @@
 import { Decomposed, decompose, shanten } from './tempai'
 import { Pai, comparePai, group, shimocha, shuffle, toPaiArray, uniqPai } from './utils'
+import { canHora, yaku } from './yaku'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 export const kazes: Kaze[] = ['ton', 'nan', 'sha', 'pei']
@@ -327,11 +328,14 @@ export class Round {
         if (this.player.naki === 0 && this.rest >= 4){
           action.types.add('riichi')
         }
-        // TODO: 检查是否是门前清自摸或有其他役
         for (const [kiru, tp] of this.player.tempai14) {
-          if (tp.find(pai => comparePai(kiru, pai) === 0)) {
-            action.types.add('tsumo')
-            break
+          const pai = tp.find(pai => comparePai(kiru, pai) === 0)
+          if (pai) {
+            const yk = yaku(this, this.player, pai, true, false)
+            if (canHora(yk[0])) {
+              action.types.add('tsumo')
+              break
+            }
           }
         }
       }
@@ -342,9 +346,13 @@ export class Round {
       if (kaze === this.kaze) return null
       const action: Action = { types: new Set() }
       const tempai = this[kaze].tempai13
-      if (tempai && tempai.find(pai => this.kiru.equals(pai))) {
-        // TODO: 检查役、同巡振听
-        action.types.add('ron')
+      let pai: Pai
+      if (tempai && (pai = tempai.find(pai => this.kiru.equals(pai)))) {
+        const yk = yaku(this, this.player, pai, true, false)
+        if (canHora(yk[0])) {
+          action.types.add('ron')
+        }
+        // TODO: 振听
       }
       if (this.rest !== 0) {
         const pon = this[kaze].ponTiles
