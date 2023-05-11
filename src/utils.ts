@@ -142,19 +142,6 @@ export function shimocha(kaze: Kaze): Kaze {
   }
 }
 
-// 头跳
-export function atamahane(kaze: Kaze): Kaze {
-  switch (kaze) {
-    case 'ton':
-      return 'pei'
-    case 'nan':
-      return 'ton'
-    case 'sha':
-      return 'nan'
-    case 'pei':
-      return 'sha'
-  }
-}
 
 export function arrayEquals<T>(a: T[], b: T[]) {
   if (a === b) return true
@@ -163,4 +150,34 @@ export function arrayEquals<T>(a: T[], b: T[]) {
     if (a[i] !== b[i]) return false
   }
   return true
+}
+
+export function toMPSZ(pai: Pai[]) {
+  pai = [...pai]
+  sortPai(pai)
+  const grouped = pai.reduce((acc, x) => {
+    acc[x.type].push(x)
+    return acc
+  }, {
+    man: [], so: [], pin: [],
+    kaze: [], sangen:[],
+  } as Record<TileType, Pai[]>)
+  function red(tile: Pai) {
+    if (tile instanceof Tile) {
+      return tile.red
+    }
+    return false
+  }
+  const man = grouped.man.map(pai => red(pai) ? 0 : pai.num).join('')
+  const so = grouped.so.map(pai => red(pai) ? 0 : pai.num).join('')
+  const pin = grouped.pin.map(pai => red(pai) ? 0 : pai.num).join('')
+  const kaze = grouped.kaze.map(pai => pai.num).join('')
+  const sangen = grouped.sangen.map(pai => pai.num + 4).join('')
+  let result = ''
+  if (man !== '') result += man + 'm'
+  if (so !== '') result += so + 's'
+  if (pin !== '') result += pin + 'p'
+  result += kaze + sangen
+  if (kaze !== '' || sangen !== '') result += 'z'
+  return result
 }

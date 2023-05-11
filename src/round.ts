@@ -38,7 +38,7 @@ export class Tile implements Pai {
 
 export type ActionType = 
   | 'chi' | 'pon' | 'kan' | 'riichi' | 'ryuukyoku'
-  | 'tsumo' | 'ron' | 'dapai' | 'cancel'
+  | 'tsumo' | 'ron' | 'dahai' | 'cancel'
 export interface Action {
   types: Set<ActionType>
   chiTiles?:    Tile[][]
@@ -64,7 +64,7 @@ export class Round {
   // 上一张被切的牌
   kiru: Tile = null
 
-  chihoRyuukyokuDoubleRiichiSufurenda = true
+  chihoKyuushukyuuhaiDoubleRiichiSufurenda = true
   // null -> 还没有打牌
   // Pai -> 已经被打的风牌
   // false -> 没有四风连打
@@ -105,11 +105,12 @@ export class Round {
       }
       return tiles
     }
-    this.ton = new Player(this, 'ton', setKaze(tiles.splice(0, 14), 'ton'))
+    this.ton = new Player(this, 'ton', setKaze(tiles.splice(0, 13), 'ton'))
     this.nan = new Player(this, 'nan', setKaze(tiles.splice(0, 13), 'nan'))
     this.sha = new Player(this, 'sha', setKaze(tiles.splice(0, 13), 'sha'))
     this.pei = new Player(this, 'pei', setKaze(tiles.splice(0, 13), 'pei'))
     this.haiyama = tiles
+    this.mopai(true, 'ton')
   }
 
   get player(): Player {
@@ -149,13 +150,13 @@ export class Round {
     // 碰里面没有摸牌，故不会增加巡数
     if (!keepJun && kaze === 'ton') {
       this.jun++
-      // 亲家一巡不会摸牌，故将会在第二巡破坏状态
-      this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
+      // 第一次摸牌时 keepJun 为 true
+      this.removeIppatsuChihoKyuushukyuuhaiDoubleRiichiSufurenda()
     }
     const shanten = this.player.calcShanten14()
     const tempai = shanten.filter(([, shanten]) => shanten === 0)
     if (tempai.length !== 0) {
-      // 可以保存 yaku 以提示是否有役
+      // TODO: 可以保存 yaku 以提示是否有役
       this.player.tempai14 = tempai.map(tempai => [tempai[0], tempai[2]])
       return true
     }
@@ -180,7 +181,7 @@ export class Round {
     if (!roto || !jihai) {
       this.player.ryuukyokumangan = false
     }
-    if (this.chihoRyuukyokuDoubleRiichiSufurenda) {
+    if (this.chihoKyuushukyuuhaiDoubleRiichiSufurenda) {
       if (this.sufurenda === null) {
         if (tile.type === 'kaze') {
           this.sufurenda = tile
@@ -204,13 +205,14 @@ export class Round {
         }
         tile.riichi = true
         this.player.riichi = {
-          double: this.chihoRyuukyokuDoubleRiichiSufurenda,
+          double: this.chihoKyuushukyuuhaiDoubleRiichiSufurenda,
           iipatsu: true,
           decomposed: decompose(group(this.player.tiles)),
         }
       }
     } else {
       this.player.tempai13 = null
+      if (riichi) throw new Error('unreachable')
     }
     this.player.tempai14 = null
   }
@@ -231,7 +233,7 @@ export class Round {
     tiles.push(this.kiru)
     player.chi.push(tiles)
     this.kaze = kaze
-    this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
+    this.removeIppatsuChihoKyuushukyuuhaiDoubleRiichiSufurenda()
     this.removeRyuukyokuMangan(this.kiru.from.kaze)
   }
 
@@ -250,7 +252,7 @@ export class Round {
       chakan: false,
     })
     this.kaze = kaze
-    this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
+    this.removeIppatsuChihoKyuushukyuuhaiDoubleRiichiSufurenda()
     this.removeRyuukyokuMangan(this.kiru.from.kaze)
   }
 
@@ -268,7 +270,7 @@ export class Round {
 
     this.mopai(true, kaze)
     this.kanCount++
-    this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
+    this.removeIppatsuChihoKyuushukyuuhaiDoubleRiichiSufurenda()
     this.removeRyuukyokuMangan(this.kiru.from.kaze)
   }
 
@@ -283,7 +285,7 @@ export class Round {
     this.player.ankan.push(tiles)
     this.kiru = tiles[0]
     this.kanCount++
-    this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
+    this.removeIppatsuChihoKyuushukyuuhaiDoubleRiichiSufurenda()
   }
 
   chakan(tile: Tile) {
@@ -296,7 +298,7 @@ export class Round {
     }
     this.kiru = tile
     this.kanCount++
-    this.removeIppatsuChihoRyokyokuDoubleRiichiSufurenda()
+    this.removeIppatsuChihoKyuushukyuuhaiDoubleRiichiSufurenda()
   }
 
   // 见逃
@@ -305,8 +307,9 @@ export class Round {
     player.dojunfuriten = true
   }
 
-  removeIppatsuChihoRyokyokuDoubleRiichiSufurenda() {
-    this.chihoRyuukyokuDoubleRiichiSufurenda = false
+  // 鸣牌会破坏一发、地和、九种九牌、双立直、四风连打
+  removeIppatsuChihoKyuushukyuuhaiDoubleRiichiSufurenda() {
+    this.chihoKyuushukyuuhaiDoubleRiichiSufurenda = false
     this.sufurenda = false
     for (const kaze of kazes) {
       if (this[kaze].riichi) {
@@ -347,13 +350,14 @@ export class Round {
   // this.kiru.from.kaze === this.kaze => 自家刚打完牌
   // this.kiru.from.kaze !== this.kaze => 等待自家打牌
   // 返回 null 则为不需要操作
+  // TODO: 立直后不能有吃碰了，杠的时候检查是否改变牌型。
   action(kaze: Kaze, chankan?: boolean, ankan?: boolean): Action {
     // 是否已经摸牌
-    const mopai = this.kiru.from.kaze !== this.kaze
+    const mopai = !this.kiru || this.kiru.from.kaze !== this.kaze
     if (mopai) {
       if (kaze !== this.kaze) return null
       const action: Action = { types: new Set() }
-      if (this.chihoRyuukyokuDoubleRiichiSufurenda) {
+      if (this.chihoKyuushukyuuhaiDoubleRiichiSufurenda) {
         const counts = group(this[kaze].tiles)
         const yaochu = [
           counts['man'][0], counts['man'][8],
@@ -378,14 +382,14 @@ export class Round {
           action.chakanTiles = chakan
         }
       }
-      if (this.player.tempai14.length !== 0) {
-        if (this.player.naki === 0 && this.rest >= 4){
+      if (this.player.tempai14 && this.player.tempai14.length !== 0) {
+        if (!this.player.riichi && this.player.naki === 0 && this.rest >= 4){
           action.types.add('riichi')
         }
         for (const [kiru, tp] of this.player.tempai14) {
           const hora = tp.some(pai => comparePai(kiru, pai) === 0)
           if (hora) {
-            const yk = yaku(this, this.player, null, true, false)
+            const yk = yaku(this, this[kaze], null, true, false)
             if (canHora(yk[0])) {
               action.yaku = yk
               action.types.add('tsumo')
@@ -394,7 +398,7 @@ export class Round {
           }
         }
       }
-      action.types.add('dapai')
+      action.types.add('dahai')
       return action
     } else {
       // 刚打出牌
@@ -403,8 +407,8 @@ export class Round {
       const tempai = this[kaze].tempai13
       let pai: Pai
       if (tempai && (pai = tempai.find(pai => this.kiru.equals(pai)))) {
-        const yk = yaku(this, this.player, this.kiru, false, chankan)
-        if (canHora(yk[0]) && !this[kaze].furiten) {
+        const yk = yaku(this, this[kaze], this.kiru, false, chankan)
+        if (canHora(yk[0]) && !this[kaze].furiten && !this[kaze].dojunfuriten) {
           if (chankan) {
             // 抢杠和国士无双抢暗杠
             if (!ankan || (ankan && (yk[0].kokushimusou || yk[0].kokushimusou13))) {

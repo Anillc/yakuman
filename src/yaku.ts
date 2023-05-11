@@ -159,7 +159,7 @@ export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, ch
     // 门前清自摸
     yaku.tsumo = 1
     yaku.fu += 2
-    if (round.chihoRyuukyokuDoubleRiichiSufurenda) {
+    if (round.chihoKyuushukyuuhaiDoubleRiichiSufurenda) {
       if (player.kaze === 'ton') {
         yaku.tenho = 13
       } else {
@@ -172,6 +172,21 @@ export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, ch
     tiles, player.chi, player.pon.map(pon => pon.tiles),
     player.minkan, player.ankan, last,
   ].flat(2)
+
+  // 立直
+  if (player.riichi) {
+    if (player.naki !== 0) throw new Error('unreachable')
+    if (player.riichi.double) {
+      yaku.doubleriichi = 2
+    } else {
+      yaku.riichi = 1
+    }
+    // 一发
+    if (player.riichi.iipatsu) {
+      yaku.ippatsu = 1
+    }
+  }
+
 
   // 断幺九
   let tanyao = true
@@ -375,7 +390,7 @@ export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, ch
         normalYaku(round, player, yaku, dec, last, tsumo)
       }
     }
-    return yakus.map(yaku => final(yaku)).reduce((acc, x) => acc[1] > x[1] ? x : acc, [null, -Infinity])
+    return yakus.map(yaku => final(yaku)).reduce((acc, x) => x[1] > acc[1] ? x : acc, [null, -Infinity])
   } else {
     return final(yaku, type === 'chitoitsu')
   }
@@ -385,20 +400,6 @@ function normalYaku(
   round: Round, player: Player, yaku: Yaku,
   decomposed: Decomposed, last: Pai, tsumo: boolean,
 ) {
-  // 立直
-  if (player.riichi) {
-    if (player.naki !== 0) throw new Error('unreachable')
-    if (player.riichi.double) {
-      yaku.doubleriichi = 2
-    } else {
-      yaku.riichi = 1
-    }
-    // 一发
-    if (player.riichi.iipatsu) {
-      yaku.ippatsu = 1
-    }
-  }
-
   const mentsu: Block[] = []
   const toitsu: Block[] = []
 

@@ -1,5 +1,5 @@
 import { Action, ActionType, Kaze, Player, Round, Tile, kazes } from './round'
-import { atamahane, shimocha } from './utils'
+import { shimocha } from './utils'
 import { Yaku } from './yaku'
 
 export class MahjongContext implements Action {
@@ -24,7 +24,7 @@ export class MahjongContext implements Action {
   }
 
   dahai(tile: Tile, riichi?: boolean) {
-    if (tile !== this.player.tiles.at(-1)) {
+    if (this.player.riichi && tile !== this.player.tiles.at(-1)) {
       throw new Error('unreachable')
     }
     this.round.dahai(tile, riichi)
@@ -38,6 +38,7 @@ export class MahjongContext implements Action {
           },
         })
       }
+      this.mahjong.naki()
     } else if (this.round.sufurenda === true) {
       this.mahjong.end({
         type: 'ryuukyoku',
@@ -110,7 +111,7 @@ export class Mahjong {
   round: Round
   kaze: Kaze = 'ton'
   num = 0
-  score = [2500, 2500, 2500, 2500]
+  score = [25000, 25000, 25000, 25000]
   homba = 0
 
   constructor(
@@ -140,7 +141,7 @@ export class Mahjong {
     if (!ctxs.every(ctx => ctx.types.has('ron'))) throw new Error('unreachable')
     let head = this.round.kiru.from.kaze
     while (!ctxs.find(ctx => ctx.player.kaze === head)) {
-      head = atamahane(head)
+      head = shimocha(head)
     }
     const furikomi = this.index(this.round.kiru.from.kaze)
     const hora: MahjongEnd['hora'] = []
@@ -159,7 +160,7 @@ export class Mahjong {
         yaku: ctx.yaku[0],
         score,
       })
-      this.score[ctx.player.kaze] += score
+      this.score[this.index(ctx.player.kaze)] += score
     }
     this.end({
       type: 'hora',
@@ -194,7 +195,7 @@ export class Mahjong {
     }
     // 供托
     score += this.homba * 300 + kazes.filter(kaze => this.round[kaze].riichi).length * 1000
-    this.score[ctx.player.kaze] += score
+    this.score[this.index(ctx.player.kaze)] += score
     this.end({
       type: 'hora',
       hora: [{
@@ -207,6 +208,7 @@ export class Mahjong {
 
   mopai(keepJun?: boolean, kaze?: Kaze) {
     if (this.round.rest === 0) {
+      // TODO: 计算点数
       this.end({
         type: 'ryuukyoku',
         ryuukyoku: {
