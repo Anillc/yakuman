@@ -350,7 +350,6 @@ export class Round {
   // this.kiru.from.kaze === this.kaze => 自家刚打完牌
   // this.kiru.from.kaze !== this.kaze => 等待自家打牌
   // 返回 null 则为不需要操作
-  // TODO: 立直后不能有吃碰了，杠的时候检查是否改变牌型。
   action(kaze: Kaze, chankan?: boolean, ankan?: boolean): Action {
     // 是否已经摸牌
     const mopai = !this.kiru || this.kiru.from.kaze !== this.kaze
@@ -372,12 +371,26 @@ export class Round {
       // 最后一张牌的时候没有杠
       if (this.rest !== 0 && this.kanCount < 4) {
         const ankan = this.player.ankanTiles
-        if (ankan.length !== 0) {
-          action.types.add('kan')
-          action.ankanTiles = ankan
+        if (this[kaze].riichi) {
+          const riichiAnkan = ankan.filter(ankan => {
+            return this[kaze].riichi.decomposed.every(dec => {
+              return dec.blocks.find(block => block.type === 'kotsu'
+                && ankan[0].equals(block.tileType, block.tiles[0]))
+            })
+          })
+          if (riichiAnkan.length !== 0) {
+            action.types.add('kan')
+            action.ankanTiles = riichiAnkan
+          }
+        } else {
+          if (ankan.length !== 0) {
+            action.types.add('kan')
+            action.ankanTiles = ankan
+          }
         }
         const chakan = this.player.chakanTiles
         if (chakan.length !== 0) {
+          if (this[kaze].riichi) throw new Error('unreachable')
           action.types.add('kan')
           action.chakanTiles = chakan
         }
@@ -424,7 +437,7 @@ export class Round {
           this.minogashi(kaze)
         }
       }
-      if (this.rest !== 0) {
+      if (this.rest !== 0 && this[kaze].riichi) {
         const pon = this[kaze].ponTiles
         if (pon.length !== 0) {
           action.types.add('pon')
