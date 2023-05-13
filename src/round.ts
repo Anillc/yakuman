@@ -159,8 +159,11 @@ export class Round {
     const shanten = this.player.calcShanten14()
     const tempai = shanten.filter(([, shanten]) => shanten === 0)
     if (tempai.length !== 0) {
-      // TODO: 可以保存 yaku 以提示是否有役
-      this.player.tempai14 = tempai.map(tempai => [tempai[0], tempai[2]])
+      this.player.tempai14 = tempai.map(tempai => {
+        const yk = tempai[2].map(tempai =>
+          canHora(yaku(this, this.player, tempai, false, false)[0]))
+        return [tempai[0], tempai[2], yk]
+      })
       return true
     }
     return false
@@ -493,7 +496,7 @@ export class Player {
   // 打牌时设置
   tempai13: Pai[]
   // 摸牌时设置，打牌时清除
-  tempai14: [Pai, Pai[]][]
+  tempai14: [dahai: Pai, tempai: Pai[], yaku: boolean[]][]
 
   dojunfuriten = false
   // 已切的牌，用于计算舍张振听
