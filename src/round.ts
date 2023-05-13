@@ -74,31 +74,34 @@ export class Round {
   constructor (
     // 场风
     public bakaze: Kaze,
+    tiles?: Tile[],
   ) {
-    const tiles: Tile[] = []
-    for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
-      for (let i = 0; i < 9; i++) {
-        if (i + 1 === 5) {
-          tiles.push(new Tile(type, i + 1, true))
-        } else {
-          tiles.push(new Tile(type, i + 1, false))
+    if (!tiles) {
+      tiles = []
+      for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
+        for (let i = 0; i < 9; i++) {
+          if (i + 1 === 5) {
+            tiles.push(new Tile(type, i + 1, true))
+          } else {
+            tiles.push(new Tile(type, i + 1, false))
+          }
+          for (let j = 0; j < 3; j++) {
+            tiles.push(new Tile(type, i + 1, false))
+          }
         }
-        for (let j = 0; j < 3; j++) {
-          tiles.push(new Tile(type, i + 1, false))
+      }
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+          tiles.push(new Tile('kaze', i + 1, false))
         }
       }
-    }
-    for (let i = 0; i < 4; i++) {
-      for (let j = 0; j < 4; j++) {
-        tiles.push(new Tile('kaze', i + 1, false))
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 4; j++) {
+          tiles.push(new Tile('sangen', i + 1, false))
+        }
       }
+      shuffle(tiles)
     }
-    for (let i = 0; i < 3; i++) {
-      for (let j = 0; j < 4; j++) {
-        tiles.push(new Tile('sangen', i + 1, false))
-      }
-    }
-    shuffle(tiles)
     function setKaze(tiles: Tile[], kaze: Kaze) {
       for (const tile of tiles) {
         tile.from.kaze = kaze
@@ -437,7 +440,7 @@ export class Round {
           this.minogashi(kaze)
         }
       }
-      if (this.rest !== 0 && this[kaze].riichi) {
+      if (this.rest !== 0 && !this[kaze].riichi) {
         const pon = this[kaze].ponTiles
         if (pon.length !== 0) {
           action.types.add('pon')

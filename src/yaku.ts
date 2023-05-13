@@ -336,7 +336,7 @@ export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, ch
         return num >= 1
       })) {
         if (counts13.every((tile, num) => {
-          if (num === 0 || num === 9) return tile === 3
+          if (num === 0 || num === 8) return tile === 3
           return tile === 1
         })) {
           yaku.junseikyuurempoto = 26
@@ -612,7 +612,7 @@ function normalYaku(
     }
     if (count === 1) {
       yaku.iipeko = 1
-    } else {
+    } else if (count === 2) {
       yaku.ryampeko = 3
     }
   }

@@ -109,14 +109,17 @@ export class MahjongEnd {
 
 export class Mahjong {
   round: Round
+  // 东一局开始
   kaze: Kaze = 'ton'
-  num = 0
+  num = 1
   score = [25000, 25000, 25000, 25000]
   homba = 0
 
   constructor(
     public callback: (ctxs: { [k in Kaze]?: MahjongContext }, cancel: () => void) => void,
-    public end: (end: MahjongEnd) => void,
+    public roundEnd: (end: MahjongEnd) => void,
+    public gameEnd: () => void,
+    public createTiles?: (kaze: Kaze, num: number, homba: number) => Tile[],
   ) {
     this.createRound()
     this.next()
@@ -169,7 +172,7 @@ export class Mahjong {
   }
 
   tsumo(ctx: MahjongContext) {
-    if (!ctx.types.has('ron')) throw new Error('unreachable')
+    if (!ctx.types.has('tsumo')) throw new Error('unreachable')
     const oya = this.round.bakaze === ctx.player.kaze
     let score = Math.ceil((oya ? 6 * ctx.yaku[1] : 4 * ctx.yaku[1]) / 100) * 100
     for (const kaze of kazes) {
@@ -208,13 +211,15 @@ export class Mahjong {
 
   mopai(keepJun?: boolean, kaze?: Kaze) {
     if (this.round.rest === 0) {
+      const tempai = kazes.filter(kaze => this.round[kaze].tempai13)
+      const mangan = kazes.filter(kaze => this.round[kaze].ryuukyokumangan)
       // TODO: 计算点数
       this.end({
         type: 'ryuukyoku',
         ryuukyoku: {
           type: '荒牌流局',
-          tempai: kazes.filter(kaze => this.round[kaze].tempai13),
-          mangan: kazes.filter(kaze => this.round[kaze].ryuukyokumangan),
+          tempai,
+          mangan,
         },
       })
       return
@@ -257,24 +262,57 @@ export class Mahjong {
     }
   }
 
-  createRound() {
-    this.nextKaze()
-    this.round = new Round(this.kaze)
-    return this.round
+  index(kaze: Kaze) {
+    return (kazes.indexOf(kaze) + this.num - 1) % 4
   }
 
-  nextKaze() {
-    // TODO: 结束、连庄
-    if (this.num === 4) {
-      this.num = 1
-      this.kaze = shimocha(this.kaze)
-    } else {
-      this.num++
+  end(end: MahjongEnd) {
+    this.roundEnd(end)
+    if (!this.nextRound(end)) {
+      this.gameEnd()
     }
   }
 
-  index(kaze: Kaze) {
-    return (kazes.indexOf(kaze) + this.num - 1) % 4
+  nextRound(end: MahjongEnd): boolean {
+    // 被飞了
+    if (this.score.some(score => score < 0)) {
+      return false
+    }
+    // 西入后只要有人分数超过 30000 则结束
+    if (this.kaze === 'sha' && this.score.some(score => score > 30000)) {
+      return false
+    }
+    // 南四局如果庄家是第一则结束
+    if (this.kaze === 'nan' && this.num === 4) {
+      const index = this.index(this.round.bakaze)
+      if (this.score.every((score, i) => i === index || score > this.score[index])) {
+        return false
+      }
+    }
+    let oya = false
+    if (end.type === 'hora') {
+      oya = end.hora.some(hora => hora.kaze === this.round.bakaze)
+    } else if (end.type === 'ryuukyoku' && end.ryuukyoku.type === '荒牌流局') {
+      oya = end.ryuukyoku.tempai.some(tempai => tempai === this.round.bakaze)
+    }
+    // 西、南四局如果是闲家和牌则结束
+    // (不会北入)
+    if (['nan', 'sha'].includes(this.kaze) && this.num === 4) {
+      if (!oya) return false
+    }
+    if (oya) {
+      this.homba++
+      this.createRound()
+    } else if (this.num < 4) {
+      this.num++
+      this.createRound()
+    } else {
+      this.num = 1
+      this.kaze = shimocha(this.kaze)
+      this.createRound()
+    }
+    this.next()
+    return true
   }
 
   // 如果没有流局，则返回 true
@@ -297,5 +335,9 @@ export class Mahjong {
       }
     }
     return true
+  }
+  
+  private createRound() {
+    this.round = new Round(this.kaze, this.createTiles?.(this.kaze, this.num, this.homba))
   }
 }
