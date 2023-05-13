@@ -1,7 +1,7 @@
-import type { TileType } from './round'
+import { TileType } from './round'
 import {
-  Counts, Pai, addCounts, cartesian, cloneCounts, comparePai, createEmptyCounts,
-  sortBlocks, uniqDecomposed, uniqNumberDecomposed, uniqPai
+  Counts, DecomposedSet, NumberDecomposedSet, Pai, addCounts,
+  cartesian, cloneCounts, comparePai, createEmptyCounts, sortBlocks, uniqPai,
 } from './utils'
 
 export interface Shanten {
@@ -164,30 +164,43 @@ export function normalShanten(counts: Counts, naki: number): [shanten: number, t
 }
 
 export type BlockType = 'shuntsu' | 'kotsu' | 'toitsu' | 'ryammen' | 'penchan' | 'kanchan'
+export const blockTypes: BlockType[] = ['shuntsu', 'kotsu', 'toitsu', 'ryammen', 'penchan', 'kanchan']
 export interface Block {
   type: BlockType
   tileType: TileType
   tiles: number[]
 }
 
-export interface Decomposed {
-  blocks: Block[]
-  rest: Counts
+export class Decomposed {
+  constructor(
+    public blocks: Block[],
+    public rest: Counts,
+  ) {
+    sortBlocks(blocks)
+  }
 }
 
 // 数牌
-export interface NumberDecomposed {
-  blocks: Block[]
-  rest: number[]
+export class NumberDecomposed {
+  constructor(
+    public blocks: Block[],
+    public rest: number[],
+  ) {
+    sortBlocks(blocks)
+  }
 }
 
 export function decompose(counts: Counts): Decomposed[] {
   const [blocks, isolated, rest] = isolate(counts)
   const decomposed = jantou(rest)
-  return uniqDecomposed(decomposed.map(decomposed => ({
-    blocks: [...blocks, ...decomposed.blocks],
-    rest: addCounts(isolated, decomposed.rest),
-  })))
+  const result = new DecomposedSet()
+  for (const dec of decomposed.values()) {
+    result.add(new Decomposed(
+      [...blocks, ...dec.blocks],
+      addCounts(isolated, dec.rest),
+    ))
+  }
+  return result.values()
 }
 
 function isolate(counts: Counts): [
@@ -272,55 +285,49 @@ function isolate(counts: Counts): [
       }
     }
   }
-  sortBlocks(blocks)
   return [blocks, isolated, counts]
 }
 
 // 计算面子与雀头
 function jantou(counts: Counts) {
   counts = cloneCounts(counts)
-  const results: Decomposed[] = []
+  const results = new DecomposedSet()
   for (const [type, tiles] of Object.entries(counts)) {
     for (let i = 0; i < tiles.length; i++) {
       if (tiles[i] < 2) continue
       const cloned = cloneCounts(counts)
       cloned[type][i] -= 2
-      for (const { blocks, rest } of mentsu(cloned)) {
-        results.push({
-          blocks: blocks.concat({
+      for (const { blocks, rest } of mentsu(cloned).values()) {
+        results.add(new Decomposed(
+          blocks.concat({
             type: 'toitsu',
             tileType: type as TileType,
             tiles: [i + 1, i + 1],
           }),
           rest,
-        })
+        ))
       }
     }
   }
-  results.forEach(({ blocks }) => sortBlocks(blocks))
-  results.push(...mentsu(counts))
+  results.addSet(mentsu(counts))
   return results
 }
 
 // 计算面子
-function mentsu(counts: Counts): Decomposed[] {
+function mentsu(counts: Counts): DecomposedSet {
   counts = cloneCounts(counts)
-  const results: NumberDecomposed[][] = []
+  const results: NumberDecomposedSet[] = []
   for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
-    const result: NumberDecomposed[] = []
+    const result = new NumberDecomposedSet()
     const tiles = counts[type]
-    for (const { blocks: b1, rest } of [...kotsu(tiles, type), ...shuntsu(tiles, type)]) {
-      for (const { blocks: b2, rest: r2 } of tatsu(rest, type, Math.max(0, 4 - b1.length))) {
-        result.push({
-          blocks: [...b1, ...b2],
-          rest: r2,
-        })
+    for (const { blocks: b1, rest } of [...kotsu(tiles, type).values(), ...shuntsu(tiles, type).values()]) {
+      for (const { blocks: b2, rest: r2 } of tatsu(rest, type, Math.max(0, 4 - b1.length)).values()) {
+        result.add(new NumberDecomposed([...b1, ...b2], r2))
       }
     }
     results.push(result)
   }
-  results.forEach(decomposed => decomposed.forEach(({ blocks }) => sortBlocks(blocks)))
-  const mps = cartesian(...results.map(uniqNumberDecomposed))
+  const mps = cartesian(...results.map(result => result.values()))
 
   // 字牌
   const tsuhai: Block[] = []
@@ -338,46 +345,49 @@ function mentsu(counts: Counts): Decomposed[] {
     }
   }
 
-  return mps.map(mps => ({
-    blocks: sortBlocks([...mps[0].blocks, ...mps[1].blocks, ...mps[2].blocks, ...tsuhai]),
-    rest: {
-      'man': mps[0].rest,
-      'so': mps[1].rest,
-      'pin': mps[2].rest,
-      'kaze': counts['kaze'],
-      'sangen': counts['sangen'],
-    },
-  }))
+  const result = new DecomposedSet()
+  mps.forEach(mps => {
+    result.add(new Decomposed(
+      [...mps[0].blocks, ...mps[1].blocks, ...mps[2].blocks, ...tsuhai],
+      {
+        'man': mps[0].rest,
+        'so': mps[1].rest,
+        'pin': mps[2].rest,
+        'kaze': counts['kaze'],
+        'sangen': counts['sangen'],
+      },
+    ))
+  })
+  return result
 }
 
-function kotsu(tiles: number[], type: TileType): NumberDecomposed[] {
-  const results: NumberDecomposed[] = []
+function kotsu(tiles: number[], type: TileType): NumberDecomposedSet {
+  const results = new NumberDecomposedSet()
   let empty = true
   for (let i = 0; i < tiles.length; i++) {
     if (tiles[i] < 3) continue
     empty = false
     const cloned = [...tiles]
     cloned[i] -= 3
-    for (const { blocks, rest } of [...kotsu(cloned, type), ...shuntsu(cloned, type)]) {
-      results.push({
-        blocks: blocks.concat({
+    for (const { blocks, rest } of [...kotsu(cloned, type).values(), ...shuntsu(cloned, type).values()]) {
+      results.add(new NumberDecomposed(
+        blocks.concat({
           type: 'kotsu',
           tileType: type,
           tiles: [i + 1, i + 1, i + 1],
         }),
         rest,
-      })
+      ))
     }
   }
   if (empty) {
-    results.push({ blocks: [], rest: tiles })
+    results.add(new NumberDecomposed([], tiles))
   }
-  results.forEach(({ blocks }) => sortBlocks(blocks))
   return results
 }
 
-function shuntsu(tiles: number[], type: TileType): NumberDecomposed[] {
-  const results: NumberDecomposed[] = []
+function shuntsu(tiles: number[], type: TileType): NumberDecomposedSet {
+  const results = new NumberDecomposedSet()
   let empty = true
   for (let i = 0; i < tiles.length; i++) {
     if (i + 2 > 8 || tiles[i] < 1 || tiles[i + 1] < 1 || tiles[i + 2] < 1) continue
@@ -386,70 +396,67 @@ function shuntsu(tiles: number[], type: TileType): NumberDecomposed[] {
     cloned[i]--
     cloned[i + 1]--
     cloned[i + 2]--
-    for (const { blocks, rest } of [...kotsu(cloned, type), ...shuntsu(cloned, type)]) {
-      results.push({
-        blocks: blocks.concat({
+    for (const { blocks, rest } of [...kotsu(cloned, type).values(), ...shuntsu(cloned, type).values()]) {
+      results.add(new NumberDecomposed(
+        blocks.concat({
           type: 'shuntsu',
           tileType: type,
           tiles: [i + 1, i + 2, i + 3],
         }),
         rest,
-      })
+      ))
     }
   }
   if (empty) {
-    results.push({
-      blocks: [],
-      rest: tiles,
-    })
+    results.add(new NumberDecomposed([], tiles))
   }
-  results.forEach(({ blocks }) => sortBlocks(blocks))
   return results
 }
 
-function tatsu(tiles: number[], type: TileType, resurse: number): NumberDecomposed[] {
-  return [
-    ...toitsu(tiles, type, resurse),
-    ...ryammen(tiles, type, resurse),
-    ...kanchan(tiles, type, resurse),
-  ]
+function tatsu(tiles: number[], type: TileType, resurse: number): NumberDecomposedSet {
+  const set = new NumberDecomposedSet()
+  set.addSet(toitsu(tiles, type, resurse))
+  set.addSet(ryammen(tiles, type, resurse))
+  set.addSet(kanchan(tiles, type, resurse))
+  return set
 }
 
-function toitsu(tiles: number[], type: TileType, resurse: number): NumberDecomposed[] {
+function toitsu(tiles: number[], type: TileType, resurse: number): NumberDecomposedSet {
+  const results = new NumberDecomposedSet()
   if (resurse === 0) {
-    return [{ blocks: [], rest: tiles }]
+    results.add(new NumberDecomposed([], tiles))
+    return results
   }
-  const results: NumberDecomposed[] = []
   let empty = true
   for (let i = 0; i < tiles.length; i++) {
     if (tiles[i] < 2) continue
     empty = false
     const cloned = [...tiles]
     cloned[i] -= 2
-    for (const { blocks, rest } of tatsu(cloned, type, resurse - 1)) {
-      results.push({
-        blocks: blocks.concat({
+    for (const { blocks, rest } of tatsu(cloned, type, resurse - 1).values()) {
+      results.add(new NumberDecomposed(
+        blocks.concat({
           type: 'toitsu',
           tileType: type,
           tiles: [i + 1, i + 1],
         }),
         rest,
-      })
+      ))
     }
   }
   if (empty) {
-    results.push({ blocks: [], rest: tiles })
+    results.add(new NumberDecomposed([], tiles))
   }
-  results.forEach(({ blocks }) => sortBlocks(blocks))
   return results
 }
 
 // 两面和边张
-function ryammen(tiles: number[], type: TileType, resurse: number): NumberDecomposed[] {
+function ryammen(tiles: number[], type: TileType, resurse: number): NumberDecomposedSet {
+  const results = new NumberDecomposedSet()
   if (resurse === 0) {
-    return [{ blocks: [], rest: tiles }]
+    results.add(new NumberDecomposed([], tiles))
+    return results
   }
-  const results: NumberDecomposed[] = []
   let empty = true
   for (let i = 0; i < tiles.length; i++) {
     if (i + 1 > 8 || tiles[i] < 1 || tiles[i + 1] < 1) continue
@@ -457,29 +464,29 @@ function ryammen(tiles: number[], type: TileType, resurse: number): NumberDecomp
     const cloned = [...tiles]
     cloned[i]--
     cloned[i + 1]--
-    for (const { blocks, rest } of tatsu(cloned, type, resurse - 1)) {
-      results.push({
-        blocks: blocks.concat({
+    for (const { blocks, rest } of tatsu(cloned, type, resurse - 1).values()) {
+      results.add(new NumberDecomposed(
+        blocks.concat({
           type: i === 0 || i === 7 ? 'penchan' : 'ryammen',
           tileType: type,
           tiles: [i + 1, i + 2],
         }),
         rest,
-      })
+      ))
     }
   }
   if (empty) {
-    results.push({ blocks: [], rest: tiles })
+    results.add(new NumberDecomposed([], tiles))
   }
-  results.forEach(({ blocks }) => sortBlocks(blocks))
   return results
 }
 
-function kanchan(tiles: number[], type: TileType, resurse: number): NumberDecomposed[] {
+function kanchan(tiles: number[], type: TileType, resurse: number): NumberDecomposedSet {
+  const results = new NumberDecomposedSet()
   if (resurse === 0) {
-    return [{ blocks: [], rest: tiles }]
+    results.add(new NumberDecomposed([], tiles))
+    return results
   }
-  const results: NumberDecomposed[] = []
   let empty = true
   for (let i = 0; i < tiles.length; i++) {
     if (i + 2 > 8 || tiles[i] < 1 || tiles[i + 2] < 1) continue
@@ -487,21 +494,20 @@ function kanchan(tiles: number[], type: TileType, resurse: number): NumberDecomp
     const cloned = [...tiles]
     cloned[i]--
     cloned[i + 2]--
-    for (const { blocks, rest } of tatsu(cloned, type, resurse - 1)) {
-      results.push({
-        blocks: blocks.concat({
+    for (const { blocks, rest } of tatsu(cloned, type, resurse - 1).values()) {
+      results.add(new NumberDecomposed(
+        blocks.concat({
           type: 'kanchan',
           tileType: type,
           tiles: [i + 1, i + 3],
         }),
         rest,
-      })
+      ))
     }
   }
   if (empty) {
-    results.push({ blocks: [], rest: tiles })
+    results.add(new NumberDecomposed([], tiles))
   }
-  results.forEach(({ blocks }) => sortBlocks(blocks))
   return results
 }
 

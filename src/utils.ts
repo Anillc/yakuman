@@ -1,5 +1,5 @@
-import { Kaze, Tile, TileType } from './round'
-import { Block, Decomposed, NumberDecomposed } from './tempai'
+import { Kaze, Tile, TileType, tileTypes } from './round'
+import { Block, Decomposed, NumberDecomposed, blockTypes } from './tempai'
 import uniqWith from 'lodash.uniqwith'
 
 export interface Pai {
@@ -73,26 +73,6 @@ export function sortBlocks(blocks: Block[]) {
   return blocks.sort(compareBlock)
 }
 
-export function uniqDecomposed(decomposed: Decomposed[]) {
-  return uniqWith(decomposed, (a, b) => {
-    if (compareCounts(a.rest, b.rest) !== 0) return false
-    for (let i = 0; i < a.blocks.length; i++) {
-      if (compareBlock(a.blocks[i], b.blocks[i]) !== 0) return false
-    }
-    return true
-  })
-}
-
-export function uniqNumberDecomposed(decomposed: NumberDecomposed[]) {
-  return uniqWith(decomposed, (a, b) => {
-    if (a.rest.join() !== b.rest.join()) return false
-    for (let i = 0; i < a.blocks.length; i++) {
-      if (compareBlock(a.blocks[i], b.blocks[i]) !== 0) return false
-    }
-    return true
-  })
-}
-
 export function comparePai(a: Pai, b: Pai) {
   if (a.type !== b.type) return a.type > b.type ? 1 : -1
   if (a.num !== b.num) return a.num > b.num ? 1 : -1
@@ -142,7 +122,6 @@ export function shimocha(kaze: Kaze): Kaze {
   }
 }
 
-
 export function arrayEquals<T>(a: T[], b: T[]) {
   if (a === b) return true
   if (a.length !== b.length) return false
@@ -180,4 +159,112 @@ export function toMPSZ(pai: Pai[]) {
   result += kaze + sangen
   if (kaze !== '' || sangen !== '') result += 'z'
   return result
+}
+
+export function countsHash(counts: Counts) {
+  let x = 0
+  let hash = 0
+  for (const type of ['man', 'so', 'pin', 'kaze', 'sangen'] satisfies TileType[]) {
+    for (let i = 0; i < counts[type].length; i++) {
+      hash += counts[type][i] << x * 4
+      x++
+    }
+  }
+  return hash
+}
+
+export function blockHash(block: Block) {
+  const type = blockTypes.indexOf(block.type)
+  const tileType = tileTypes.indexOf(block.tileType) << 3
+  const tiles = block.tiles.reduce((acc, tile) => acc + tile, 0) << 6
+  return type + tileType + tiles
+}
+
+export class DecomposedSet {
+  map = new Map<number, Decomposed[]>()
+
+  add(decomposed: Decomposed) {
+    const hash = this.hash(decomposed)
+    const decs = this.map.get(hash)
+    if (!decs) {
+      this.map.set(hash, [decomposed])
+    } else {
+      const same = decs.find(dec => {
+        if (compareCounts(dec.rest, decomposed.rest) !== 0) return false
+        for (let i = 0; i < dec.blocks.length; i++) {
+          if (compareBlock(dec.blocks[i], decomposed.blocks[i]) !== 0) return false
+        }
+        return true
+      })
+      if (!same) {
+        decs.push(decomposed)
+      }
+    }
+  }
+
+  addAll(...decs: Decomposed[]) {
+    decs.forEach(this.add.bind(this))
+  }
+
+  addSet(set: DecomposedSet) {
+    set.values().forEach(this.add.bind(this))
+  }
+
+  values() {
+    return [...this.map.values()].flat()
+  }
+
+  private hash(decomposed: Decomposed) {
+    let hash = countsHash(decomposed.rest)
+    for (const block of decomposed.blocks) {
+      hash += blockHash(block)
+    }
+    return hash
+  }
+}
+
+export class NumberDecomposedSet {
+  map = new Map<number, NumberDecomposed[]>()
+
+  add(decomposed: NumberDecomposed) {
+    const hash = this.hash(decomposed)
+    const decs = this.map.get(hash)
+    if (!decs) {
+      this.map.set(hash, [decomposed])
+    } else {
+      const same = decs.find(dec => {
+        if (dec.rest.join() !== decomposed.rest.join()) return false
+        for (let i = 0; i < dec.blocks.length; i++) {
+          if (compareBlock(dec.blocks[i], decomposed.blocks[i]) !== 0) return false
+        }
+        return true
+      })
+      if (!same) {
+        decs.push(decomposed)
+      }
+    }
+  }
+
+  values() {
+    return [...this.map.values()].flat()
+  }
+
+  addAll(...decs: NumberDecomposed[]) {
+    decs.forEach(this.add.bind(this))
+  }
+
+  addSet(set: NumberDecomposedSet) {
+    set.values().forEach(this.add.bind(this))
+  }
+
+  private hash(decomposed: NumberDecomposed) {
+    let hash = 0
+    for (let i = 0; i < decomposed.rest.length; i++) {
+      hash += decomposed.rest[i] << 4 * i
+    }
+    for (const block of decomposed.blocks) {
+      hash += blockHash(block)
+    }
+    return hash
+  }
 }

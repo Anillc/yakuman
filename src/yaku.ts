@@ -145,9 +145,9 @@ function checkType(player: Player, tiles: Pai[]): HoraType {
   }
 }
 
-export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, chankan: boolean) {
+export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, chankan: boolean, optionalPai?: Pai[]) {
   const yaku: Yaku = { fu: 20, fan: 0 }
-  const tiles: Pai[] = [...player.tiles]
+  const tiles: Pai[] = optionalPai ? [...optionalPai] : [...player.tiles]
   if (!last) {
     last = tiles.pop()
   }
@@ -460,7 +460,7 @@ function normalYaku(
   }
 
   if (mentsu.length === 3 && toitsu.length === 2) {
-    const kotsuIndex = toitsu.findIndex(toitsu => comparePai(last, { type: toitsu.tileType, num: toitsu.tiles[0] }))
+    const kotsuIndex = toitsu.findIndex(toitsu => comparePai(last, { type: toitsu.tileType, num: toitsu.tiles[0] }) === 0)
     if (kotsuIndex === -1) throw new Error('unreachable')
     const kotsu = toitsu.splice(kotsuIndex, 1)[0]
     mentsu.push({

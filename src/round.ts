@@ -9,6 +9,7 @@ export type Sangen = 'white' | 'green' | 'red'
 export const sangens: Sangen[] = ['white', 'green', 'red']
 
 export type TileType = 'pin' | 'so' | 'man' | 'kaze' | 'sangen'
+export const tileTypes: TileType[] = ['pin', 'so', 'man', 'kaze', 'sangen']
 
 export class Tile implements Pai {
   riichi = false
@@ -159,10 +160,14 @@ export class Round {
     const shanten = this.player.calcShanten14()
     const tempai = shanten.filter(([, shanten]) => shanten === 0)
     if (tempai.length !== 0) {
-      this.player.tempai14 = tempai.map(tempai => {
-        const yk = tempai[2].map(tempai =>
-          canHora(yaku(this, this.player, tempai, false, false)[0]))
-        return [tempai[0], tempai[2], yk]
+      this.player.tempai14 = tempai.map(([dahai, shanten, tempai]) => {
+        const tiles = [...this.player.tiles]
+        const index = tiles.findIndex(tile => tile.equals(dahai))
+        if (index === -1) throw new Error('unreachable')
+        tiles.splice(index, 1)
+        const yk = tempai.map(tempai =>
+          canHora(yaku(this, this.player, tempai, false, false, tiles)[0]))
+        return [dahai, tempai, yk]
       })
       return true
     }
