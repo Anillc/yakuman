@@ -181,8 +181,8 @@ export class Round {
     }
     const roto = ['man', 'so', 'pin'].includes(tile.type) && (tile.num === 1 || tile.num === 9)
     const jihai = ['kaze', 'sangen'].includes(tile.type)
-    if (!roto || !jihai) {
-      this.player.ryuukyokumangan = false
+    if (!roto && !jihai) {
+      this.removeRyuukyokuMangan(this.kaze)
     }
     if (this.chihoKyuushukyuuhaiDoubleRiichiSufurenda) {
       if (this.sufurenda === null) {

@@ -2,6 +2,7 @@ import { Action, ActionType, Kaze, Player, Round, Tile, kazes } from './round'
 import { shimocha } from './utils'
 import { Yaku } from './yaku'
 
+// TODO: 包牌
 export class MahjongContext implements Action {
   types: Set<ActionType>
   chiTiles?: Tile[][]
@@ -113,7 +114,10 @@ export class Mahjong {
   kaze: Kaze = 'ton'
   num = 1
   score = [25000, 25000, 25000, 25000]
+  // 本场棒
   homba = 0
+  // 立直棒
+  riichibo = 0
 
   constructor(
     public callback: (ctxs: { [k in Kaze]?: MahjongContext }, cancel: () => void) => void,
@@ -154,7 +158,7 @@ export class Mahjong {
       this.score[furikomi] -= score
       if (head === ctx.player.kaze) {
         // 供托
-        const kyotaku = this.homba * 300 + kazes.filter(kaze => this.round[kaze].riichi).length * 1000
+        const kyotaku = this.homba * 300 + (this.riichibo + kazes.filter(kaze => this.round[kaze].riichi).length) * 1000
         score += kyotaku
         this.score[furikomi] -= kyotaku
       }
@@ -197,7 +201,7 @@ export class Mahjong {
       }
     }
     // 供托
-    score += this.homba * 300 + kazes.filter(kaze => this.round[kaze].riichi).length * 1000
+    score += this.homba * 300 + (this.riichibo + kazes.filter(kaze => this.round[kaze].riichi).length) * 1000
     this.score[this.index(ctx.player.kaze)] += score
     this.end({
       type: 'hora',
@@ -213,7 +217,40 @@ export class Mahjong {
     if (this.round.rest === 0) {
       const tempai = kazes.filter(kaze => this.round[kaze].tempai13)
       const mangan = kazes.filter(kaze => this.round[kaze].ryuukyokumangan)
-      // TODO: 计算点数
+      if (mangan.length !== 0) {
+        const a = 2000
+        for (const kaze of mangan) {
+          if (kaze === this.round.bakaze) {
+            // 庄家流满
+            this.score[this.index(kaze)] += 6 * a
+            for (const k of kazes) {
+              if (k === kaze) continue
+              this.score[this.index(k)] -= 2 * a
+            }
+          } else {
+            // 闲家流满
+            this.score[this.index(kaze)] += 4 * a
+            for (const k of kazes) {
+              if (k === kaze) continue
+              if (k === this.round.bakaze) {
+                this.score[this.index(k)] -= 2 * a
+              } else {
+                this.score[this.index(k)] -= a
+              }
+            }
+          }
+        }
+      } else if (tempai.length !== 0 && tempai.length !== 4) {
+        const get = 3000 / tempai.length
+        const pay = 3000 / (4 - tempai.length)
+        for (const kaze of kazes) {
+          if (tempai.includes(kaze)) {
+            this.score[this.index(kaze)] += get
+          } else {
+            this.score[this.index(kaze)] -= pay
+          }
+        }
+      }
       this.end({
         type: 'ryuukyoku',
         ryuukyoku: {
@@ -267,6 +304,16 @@ export class Mahjong {
   }
 
   end(end: MahjongEnd) {
+    // 和牌点数计算在 ron 和 tsumo 方法中
+    if (end.type === 'ryuukyoku') {
+      for (const kaze of kazes) {
+        if (!this.round[kaze].riichi) continue
+        this.score[this.index(kaze)] -= 1000
+        this.riichibo++
+      }
+    } else {
+      this.riichibo = 0
+    }
     this.roundEnd(end)
     if (!this.nextRound(end)) {
       this.gameEnd()

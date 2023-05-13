@@ -482,7 +482,6 @@ function normalYaku(
     }
   } else if (mentsu.length === 4) {
     tanki = true
-    // TODO: check this
     toitsu.push({
       type: 'toitsu',
       tileType: last.type,
