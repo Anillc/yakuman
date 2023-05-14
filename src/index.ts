@@ -2,7 +2,12 @@ import { Action, ActionType, Kaze, Player, Round, Tile, kazes } from './round'
 import { shimocha } from './utils'
 import { Yaku } from './yaku'
 
-// TODO: 包牌
+export * from './round'
+export * from './tempai'
+export * from './utils'
+export * from './yaku'
+
+// TODO: 包牌 吃碰后不能杠 吃后不能打的牌
 export class MahjongContext implements Action {
   types: Set<ActionType>
   chiTiles?: Tile[][]
@@ -93,6 +98,7 @@ export class MahjongContext implements Action {
 export class MahjongEnd {
   type: 'hora' | 'ryuukyoku'
   hora?: {
+    type: 'tsumo' | 'ron'
     kaze: Kaze
     yaku: Yaku
     score: number
@@ -118,14 +124,17 @@ export class Mahjong {
   homba = 0
   // 立直棒
   riichibo = 0
+  lastEnd: MahjongEnd
 
   constructor(
     public callback: (ctxs: { [k in Kaze]?: MahjongContext }, cancel: () => void) => void,
     public roundEnd: (end: MahjongEnd) => void,
-    public gameEnd: () => void,
     public createTiles?: (kaze: Kaze, num: number, homba: number) => Tile[],
   ) {
     this.createRound()
+  }
+
+  start() {
     this.next()
   }
 
@@ -163,6 +172,7 @@ export class Mahjong {
         this.score[furikomi] -= kyotaku
       }
       hora.push({
+        type: 'ron',
         kaze: ctx.player.kaze,
         yaku: ctx.yaku[0],
         score,
@@ -206,6 +216,7 @@ export class Mahjong {
     this.end({
       type: 'hora',
       hora: [{
+        type: 'tsumo',
         kaze: ctx.player.kaze,
         yaku: ctx.yaku[0],
         score,
@@ -314,13 +325,12 @@ export class Mahjong {
     } else {
       this.riichibo = 0
     }
+    this.lastEnd = end
     this.roundEnd(end)
-    if (!this.nextRound(end)) {
-      this.gameEnd()
-    }
   }
 
-  nextRound(end: MahjongEnd): boolean {
+  nextRound(): boolean {
+    const end = this.lastEnd
     // 被飞了
     if (this.score.some(score => score < 0)) {
       return false
