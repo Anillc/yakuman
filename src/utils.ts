@@ -2,6 +2,31 @@ import { Kaze, PlayerId, Tile, Suit, suits } from './round'
 import { Block, Decomposed, NumberDecomposed, blockTypes } from './tenpai'
 import uniqWith from 'lodash.uniqwith'
 
+// 库抛出的错误都带一个稳定的 code（ASCII），调用方按 code 判断；message 只给人看。
+// code 一览：
+//   action-not-allowed: 当前局面这家没有这个选项（例如立直中手切、吃碰之后摸切）
+//   tile-not-in-hand:   给的牌不在手牌里
+//   tedashi-drawn-tile: 手切打的是刚摸到的那张（那是摸切，请用 tsumogiri()）
+//   not-candidate:      给的候选不在候选列表里（chiTiles / ponTiles / ... 里的那一项）
+//   riichi-not-tenpai:  立直宣言牌打完之后不听牌
+//   context-used:       这个 ctx 已经执行过动作了（ctx 是一次性的，牌局已经往前走）
+//   unreachable:        库内部状态不一致；按 API 使用不会遇到，遇到就是 bug
+export type MahjongErrorCode =
+  | 'action-not-allowed'
+  | 'tile-not-in-hand'
+  | 'tedashi-drawn-tile'
+  | 'not-candidate'
+  | 'riichi-not-tenpai'
+  | 'context-used'
+  | 'unreachable'
+
+export class MahjongError extends Error {
+  constructor(public code: MahjongErrorCode, message: string) {
+    super(message)
+    this.name = 'MahjongError'
+  }
+}
+
 export interface TileKind {
   suit: Suit
   rank: number

@@ -1,6 +1,6 @@
 import { Decomposed, decompose, shanten } from './tenpai'
-import { TileKind, compareTileKind, createEmptyCounts, group, nextId, shimocha, shuffle, toTileKinds, uniqTileKinds } from './utils'
-import { Yaku, canHora, yaku } from './yaku'
+import { MahjongError, TileKind, compareTileKind, createEmptyCounts, group, nextId, shimocha, shuffle, toTileKinds, uniqTileKinds } from './utils'
+import { HoraResult, canHora, yaku } from './yaku'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 export const kazes: Kaze[] = ['ton', 'nan', 'sha', 'pei']
@@ -53,7 +53,7 @@ export interface Action {
   minkanTiles?: Tile[][]
   ankanTiles?:  Tile[][]
   chakanTiles?: Tile[]
-  hora?:        { yaku: Yaku, points: number }
+  hora?:        HoraResult
 }
 
 export class Round {
@@ -191,7 +191,7 @@ export class Round {
   // 打牌
   dahai(tile: Tile, riichi: boolean) {
     const index = this.player.tiles.indexOf(tile)
-    if (index === -1) throw new Error('dahai: 这张牌不在手牌里')
+    if (index === -1) throw new MahjongError('tile-not-in-hand', '打牌: 这张牌不在手牌里')
     // 摸切 = 打出的就是刚摸到的那张（吃碰之后的打牌算手切）
     tile.tsumogiri = !this.kiru && index === this.player.tiles.length - 1
     this.player.tiles.splice(index, 1)
@@ -232,7 +232,7 @@ export class Round {
       this.player.waits = this.tenpaiCache.find(option => compareTileKind(option.discard, tile) === 0)?.waits
       if (riichi) {
         if (!this.player.waits || this.player.naki !== 0) {
-          throw new Error('unreachable')
+          throw new MahjongError('unreachable', '立直: 打这张之后不听牌（应该由调用方先检查）')
         }
         tile.riichi = true
         this.player.riichi = {
@@ -243,7 +243,7 @@ export class Round {
       }
     } else {
       this.player.waits = null
-      if (riichi) throw new Error('unreachable')
+      if (riichi) throw new MahjongError('unreachable', '立直: 这一手不能立直（应该由调用方先检查）')
     }
     this.tenpaiCache = null
     // 岭上标记只描述刚摸到的那张牌
@@ -260,7 +260,7 @@ export class Round {
     for (const tile of tiles) {
       tile.from.turn = this.turn
       const index = player.tiles.indexOf(tile)
-      if (index === -1) throw new Error("鸣牌: 这张牌不在手牌里")
+      if (index === -1) throw new MahjongError('tile-not-in-hand', '吃: 这张牌不在手牌里')
       player.tiles.splice(index, 1)
     }
     this.player.discards.pop()
@@ -280,7 +280,7 @@ export class Round {
     for (const tile of tiles) {
       tile.from.turn = this.turn
       const index = player.tiles.indexOf(tile)
-      if (index === -1) throw new Error("鸣牌: 这张牌不在手牌里")
+      if (index === -1) throw new MahjongError('tile-not-in-hand', '碰: 这张牌不在手牌里')
       player.tiles.splice(index, 1)
     }
     this.player.discards.pop()
@@ -302,7 +302,7 @@ export class Round {
     for (const tile of tiles) {
       tile.from.turn = this.turn
       const index = player.tiles.indexOf(tile)
-      if (index === -1) throw new Error("鸣牌: 这张牌不在手牌里")
+      if (index === -1) throw new MahjongError('tile-not-in-hand', '明杠: 这张牌不在手牌里')
       player.tiles.splice(index, 1)
     }
     this.player.discards.pop()
@@ -323,7 +323,7 @@ export class Round {
     for (const tile of tiles) {
       tile.from.turn = this.turn
       const index = this.player.tiles.indexOf(tile)
-      if (index === -1) throw new Error("暗杠: 这张牌不在手牌里")
+      if (index === -1) throw new MahjongError('tile-not-in-hand', '暗杠: 这张牌不在手牌里')
       this.player.tiles.splice(index, 1)
     }
     this.player.ankan.push(tiles)
@@ -335,9 +335,9 @@ export class Round {
   chakan(tile: Tile) {
     tile.from.turn = this.turn
     const pon = this.player.pon.find(pon => pon.tiles[0].equals(tile))
-    if (!pon) throw new Error('加杠: 没有可以加杠的碰')
-    if (!this.player.tiles.includes(tile)) throw new Error('加杠: 这张牌不在手牌里')
-    if (pon.chakan) throw new Error('加杠: 这组碰已经加杠过了')
+    if (!pon) throw new MahjongError('not-candidate', '加杠: 这张牌没有对应的碰')
+    if (!this.player.tiles.includes(tile)) throw new MahjongError('tile-not-in-hand', '加杠: 这张牌不在手牌里')
+    if (pon.chakan) throw new MahjongError('not-candidate', '加杠: 这组碰已经加杠过了')
     this.player.tiles.splice(this.player.tiles.indexOf(tile), 1)
     pon.tiles.push(tile)
     pon.chakan = true
@@ -434,7 +434,7 @@ export class Round {
         }
         const chakan = this.player.chakanTiles
         if (chakan.length !== 0) {
-          if (this.players[id].riichi) throw new Error('unreachable')
+          if (this.players[id].riichi) throw new MahjongError('unreachable', '加杠: 立直中不能加杠')
           action.types.add('kan')
           action.chakanTiles = chakan
         }
@@ -449,9 +449,9 @@ export class Round {
           for (const option of this.tenpaiCache) {
             const canWin = option.waits.some(wait => compareTileKind(option.discard, wait) === 0)
             if (canWin) {
-              const [yakuResult, points] = yaku(this, this.players[id], null, true, false)
-              if (canHora(yakuResult)) {
-                action.hora = { yaku: yakuResult, points }
+              const hora = yaku(this, this.players[id], null, true, false)
+              if (canHora(hora.yaku)) {
+                action.hora = hora
                 action.types.add('tsumo')
                 break
               }
@@ -471,19 +471,19 @@ export class Round {
       const waits = this.players[id].waits
       let tileKind: TileKind
       if (waits && (tileKind = waits.find(wait => this.kiru.equals(wait)))) {
-        const [yakuResult, points] = yaku(this, this.players[id], this.kiru, false, isChankan)
-        if (canHora(yakuResult) && !this.players[id].furiten && !this.players[id].dojunfuriten) {
+        const hora = yaku(this, this.players[id], this.kiru, false, isChankan)
+        if (canHora(hora.yaku) && !this.players[id].furiten && !this.players[id].dojunfuriten) {
           if (isChankan) {
             // 抢杠和国士无双抢暗杠
-            if (!isAnkanChankan || (isAnkanChankan && (yakuResult.kokushiMusou || yakuResult.kokushiMusou13))) {
-              action.hora = { yaku: yakuResult, points }
+            if (!isAnkanChankan || (isAnkanChankan && (hora.yaku.kokushiMusou || hora.yaku.kokushiMusou13))) {
+              action.hora = hora
               action.types.add('ron')
             }
           } else {
-            action.hora = { yaku: yakuResult, points }
+            action.hora = hora
             action.types.add('ron')
           }
-        } else if (canHora(yakuResult)) {
+        } else if (canHora(hora.yaku)) {
           // 能和但被振听挡住（或见逃）→ 记同巡振听；无役不算见逃
           this.minogashi(id)
         }

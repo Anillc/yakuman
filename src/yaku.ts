@@ -1,6 +1,13 @@
 import { Player, Round, Tile, Suit, kazes, sangens } from './round'
 import { Block, Decomposed, chiitoitsuShanten, decompose, kokushiMusouShanten, minShanten, normalShanten } from './tenpai'
-import { TileKind, arrayEquals, compareTileKind, group } from './utils'
+import { MahjongError, TileKind, arrayEquals, compareTileKind, group } from './utils'
+
+// 和牌判定的结果：役（含符与番）与基本点
+// 基本点还没乘庄家/闲家倍数、也没算供托，收多少分请见 MahjongEnd
+export interface HoraResult {
+  yaku: Yaku
+  points: number
+}
 
 export interface Yaku {
   fu: number
@@ -145,7 +152,7 @@ function horaType(player: Player, tiles: TileKind[]): HoraType {
   }
 }
 
-export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: boolean, isChankan: boolean, handOverride?: TileKind[]) {
+export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: boolean, isChankan: boolean, handOverride?: TileKind[]): HoraResult {
   const yaku: Yaku = { fu: 20, fan: 0 }
   const handTiles: TileKind[] = handOverride ? [...handOverride] : [...player.tiles]
   if (!horaTile) {
@@ -177,7 +184,7 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
 
   // 立直
   if (player.riichi) {
-    if (player.naki !== 0) throw new Error('unreachable')
+    if (player.naki !== 0) throw new MahjongError('unreachable', '立直: 有副露的人不能立直')
     if (player.riichi.double) {
       yaku.doubleRiichi = 2
     } else {
@@ -400,7 +407,10 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
         normalYaku(round, player, candidate, dec, horaTile, isTsumo)
       }
     }
-    return yakus.map(yaku => finalize(yaku)).reduce((acc, x) => x[1] > acc[1] ? x : acc, [null, -Infinity])
+    const results = yakus.map(candidate => finalize(candidate))
+    if (results.length === 0) throw new MahjongError('unreachable', 'yaku: 这手牌没有可用的分解')
+    // 待ち与分解都有多个时取基本点最高的那个
+    return results.reduce((acc, x) => x.points > acc.points ? x : acc)
   } else {
     return finalize(yaku, handType === 'chiitoitsu')
   }
@@ -479,7 +489,7 @@ function normalYaku(
   // 双碰：分解里有 2 个对子，和牌张把其中一个补成刻子
   if (closedMentsu + meldedCount === 3 && toitsu.length === 2) {
     const kotsuIndex = toitsu.findIndex(toitsu => compareTileKind(horaTile, { suit: toitsu.suit, rank: toitsu.tiles[0] }) === 0)
-    if (kotsuIndex === -1) throw new Error('unreachable')
+    if (kotsuIndex === -1) throw new MahjongError('unreachable', 'yaku: 双碰的和牌张不在对子里')
     const kotsu = toitsu.splice(kotsuIndex, 1)[0]
     mentsu.push({
       type: 'kotsu',
@@ -798,7 +808,7 @@ function normalYaku(
   }
 }
 
-function finalize(result: Yaku, isChiitoitsu?: boolean): [Yaku, number] {
+function finalize(result: Yaku, isChiitoitsu?: boolean): HoraResult {
   // 七对子与国士无双按约定的固定 25 符，其余按 10 符进位
   const fixedFu = isChiitoitsu || !!result.kokushiMusou || !!result.kokushiMusou13
   const fu = fixedFu ? result.fu : Math.ceil(result.fu / 10) * 10
@@ -815,13 +825,13 @@ function finalize(result: Yaku, isChiitoitsu?: boolean): [Yaku, number] {
       newYaku.fan += 26
     }
   }
-  if (newYaku.fan >= 13) return [newYaku, basicPoints(newYaku.fan, fu)]
+  if (newYaku.fan >= 13) return { yaku: newYaku, points: basicPoints(newYaku.fan, fu) }
   for (const [name, fan] of Object.entries(result)) {
     if (['fu', 'fan'].includes(name)) continue
     newYaku[name] = fan
     newYaku.fan += fan
   }
-  return [newYaku, basicPoints(newYaku.fan, fu)]
+  return { yaku: newYaku, points: basicPoints(newYaku.fan, fu) }
 }
 
 function basicPoints(fan: number, fu: number) {
