@@ -1,5 +1,5 @@
 import { Action, ActionType, Kan, Kaze, Player, PlayerId, Round, Tile, playerIds } from './round'
-import { MahjongError, nextId, shimocha } from './utils'
+import { MahjongError, TileKind, nextId, shimocha } from './utils'
 import { HoraResult } from './yaku'
 
 export * from './round'
@@ -7,10 +7,13 @@ export * from './tenpai'
 export * from './utils'
 export * from './yaku'
 
-// 尚未实现的规则（TODO）：
-// - 食い替え：吃/碰之后不能打回刚鸣的那张（以及同筋的牌）
-// - 吃、碰之后不能杠（加杠/暗杠）
-// - 包牌（大三元、大四喜、四杠子等的责任支付）
+// 规则补充（调用方会碰到的）：
+// - 食い替え禁止：吃/碰之后不能马上打回刚鸣的那张（吃的话，同筋的另一端也不行），
+//   当前不能打的牌挂在 ctx.kuikae 上；硬打会抛 MahjongError('kuikae')
+// - 吃、碰之后这一巡不能杠（要先打一张），所以那一家拿到的 ctx.types 里不会有 kan
+// - 包（責任払い）：大三元 / 大四喜 / 四槓子 被鸣确定后和了这手役满，
+//   点数全由责任者一个人付（MahjongEnd.hora[].pao 里记着是谁）——
+//   这条默认为**关**（new Mahjong({ pao: true }) 才生效）
 //
 // 牌局由调用方"拉"着走：
 //
@@ -33,6 +36,7 @@ export class MahjongContext implements Action {
   chiTiles?: Tile[][]
   ponTiles?: Tile[][]
   kans?: Kan[]
+  kuikae?: TileKind[]
   hora?: HoraResult
 
   round: Round
@@ -63,6 +67,9 @@ export interface PromptSlot {
 export interface Prompt {
   type: 'prompt'
   slots: PromptSlot[]
+  // 现在等回答的那一格（这一圈答完 / 已经定了就是 null）。
+  // 分几次拿 step 时用它取"该答哪一格"，不要每次都从 slots[0] 重来。
+  readonly current: PromptSlot | null
   apply(ctx: MahjongContext, decision: Decision): boolean
 }
 
@@ -88,7 +95,7 @@ export type RyuukyokuType = 'hoapai' | 'kyuushu' | 'suuchaRiichi' | 'sufurenda' 
 export class MahjongEnd {
   type: 'hora' | 'ryuukyoku'
   // 和牌者（可多家）：和牌结果（役与基本点）加上这一家实际收/付的点数
-  hora?: ({ type: 'tsumo' | 'ron', id: PlayerId, score: number } & HoraResult)[]
+  hora?: ({ type: 'tsumo' | 'ron', id: PlayerId, score: number, pao?: PlayerId } & HoraResult)[]
   ryuukyoku?: {
     type: RyuukyokuType
     // 荒牌流局
@@ -117,6 +124,10 @@ export interface MahjongOptions {
   createTiles?: (dealerId: PlayerId, kyoku: number, homba: number) => Tile[]
   // 可选：多家荣和。false（默认）= 頭ハネ，只有离放铳者最近的那家和；true = 每家和牌者都收
   multipleRon?: boolean
+  // 可选：包（責任払い）。false（默认）= 不包，和了按普通算；
+  // true = 大三元 / 大四喜 / 四槓子 被鸣确定后和了这手役满，点数全由责任者一个人付
+  // （荣和时放铳者不付，自摸时三家该付的都归责任者；MahjongEnd.hora[].pao 里记着是谁）
+  pao?: boolean
 }
 
 export class Mahjong {
@@ -135,6 +146,8 @@ export class Mahjong {
   //   false = 頭ハネ（默认）：只有离放铳者最近的那家和牌，其他家不算和
   //   true  = 每家和牌者都收（天鳳・雀魂风格；本場棒/立直棒仍然只给最近的赢家）
   multipleRon = false
+  // 包（責任払い）开关：见 MahjongOptions.pao（默认不包）
+  pao = false
 
   // 下一个要交给调用方的 step（一个询问，或一次局终）
   private pending: Step | null = null
@@ -143,6 +156,7 @@ export class Mahjong {
   constructor(options?: MahjongOptions) {
     this.createTiles = options?.createTiles
     if (options?.multipleRon !== undefined) this.multipleRon = options.multipleRon
+    if (options?.pao !== undefined) this.pao = options.pao
     // 起家是 0 号，之后由 nextRound() 轮转
     this.createRound(0)
     this.next()
@@ -158,10 +172,15 @@ export class Mahjong {
   async *steps(): AsyncGenerator<Step, void, void> {
     while (this.pending) {
       const step = this.pending
+      // 询问：没答完（apply 一直返回 false）就还是这一圈，调用方可以分几次拿
+      if (step.type === 'prompt') {
+        yield step
+        continue
+      }
+      // 局终：再取一个 step 就是"打下一局"
       this.pending = null
       yield step
-      // 局终：还能继续就开下一局；不能再继续时 nextRound() 什么也不做，循环自然结束
-      if (step.type === 'roundEnd' && step.canContinue) this.nextRound()
+      if (step.canContinue) this.nextRound()
     }
   }
 
@@ -218,6 +237,9 @@ export class Mahjong {
     return {
       type: 'prompt',
       slots,
+      get current() {
+        return finished ? null : slots[index] ?? null
+      },
       apply: (ctx, decision) => {
         if (finished) throw new MahjongError('prompt-done', '这一圈已经定了，不用再回答')
         const slot = slots[index]
@@ -284,6 +306,16 @@ export class Mahjong {
       case 'pass':
         throw new MahjongError('unreachable', `${decision.action}: 这个动作由 Prompt 自己处理`)
     }
+  }
+
+  // 包（責任払い）：这一手和了被包的对象役满时，返回要全额付款的责任者。
+  // 关掉包（默认）就永远返回 null，按普通和牌算（责任者是谁仍然记在 player.pao 里）
+  private paoOf(ctx: MahjongContext): PlayerId | null {
+    if (!this.pao) return null
+    const hora = ctx.hora
+    if (!hora) return null
+    const entry = ctx.player.pao.find(entry => hora.yaku[entry.yaku])
+    return entry ? entry.playerId : null
   }
 
   // 手切：只能打手牌里原有的牌（不收牌值，必须传手牌里那张 Tile 对象，
@@ -397,12 +429,15 @@ export class Mahjong {
       const oya = ctx.player.isDealer
       const hora = ctx.hora!
       let score = Math.ceil((oya ? 6 * hora.points : 4 * hora.points) / 100) * 100
-      this.score[furikomi] -= score
+      // 包（責任払い）：被包的那手役满和了时，点数全由责任者付（放铳者不付）
+      const pao = this.paoOf(ctx)
+      const payer = pao ?? furikomi
+      this.score[payer] -= score
       if (closestWinner === ctx.player.id) {
-        // 本场的立直棒由放铳者承担（等价于立直者先付、再收回）
+        // 本场的立直棒由放铳者（被包时就是责任者）承担（等价于立直者先付、再收回）
         const kyotaku = this.homba * 300 + this.round.players.filter(player => player.riichi).length * 1000
         score += kyotaku
-        this.score[furikomi] -= kyotaku
+        this.score[payer] -= kyotaku
         // 桌上已有的立直棒是之前流局时从立直者扣过的，直接给和牌者，不再向放铳者收
         score += this.riichibo * 1000
       }
@@ -411,6 +446,7 @@ export class Mahjong {
         type: 'ron',
         id: ctx.player.id,
         score,
+        ...pao !== null ? { pao } : {},
       })
       this.score[ctx.player.id] += score
     }
@@ -427,6 +463,8 @@ export class Mahjong {
     // 每家支付额各自向上取整到百点：庄家 2a、闲家 a；庄家自摸时三家都付 2a
     const dealerPay = Math.ceil(2 * hora.points / 100) * 100
     const nonDealerPay = Math.ceil(hora.points / 100) * 100
+    // 包（責任払い）：被包的那手役满自摸时，三家该付的都由责任者一个人付
+    const pao = this.paoOf(ctx)
     let score = 0
     for (const id of playerIds) {
       if (this.round.players[id].riichi) {
@@ -435,8 +473,12 @@ export class Mahjong {
       }
       if (id === ctx.player.id) continue
       const pay = oya || this.round.players[id].isDealer ? dealerPay : nonDealerPay
-      this.score[id] -= pay + 100 * this.homba
+      if (pao === null) this.score[id] -= pay + 100 * this.homba
       score += pay
+    }
+    if (pao !== null) {
+      // 三家本该各付 pay + 本场 100，全由责任者出
+      this.score[pao] -= score + 300 * this.homba
     }
     // 供托（本场棒 + 桌上立直棒 + 本局立直棒）
     score += this.homba * 300 + (this.riichibo + this.round.players.filter(player => player.riichi).length) * 1000
@@ -448,6 +490,7 @@ export class Mahjong {
         type: 'tsumo',
         id: ctx.player.id,
         score,
+        ...pao !== null ? { pao } : {},
       }],
     })
   }

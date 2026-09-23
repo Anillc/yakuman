@@ -9,6 +9,7 @@ import uniqWith from 'lodash.uniqwith'
 //   tedashi-drawn-tile: 手切打的是刚摸到的那张（那是摸切，请用 tsumogiri()）
 //   not-candidate:      给的候选不在候选列表里（chiTiles / ponTiles / ... 里的那一项）
 //   riichi-not-tenpai:  立直宣言牌打完之后不听牌
+//   kuikae:             食い替え：刚吃/碰进来的那张（吃的话还有同筋的另一端）不能马上打出去
 //   prompt-done:        这一圈询问已经定了（Prompt.apply 过了，牌局已经往前走）
 //   out-of-order:       没按 Prompt.ctxs 的顺序回答（或抢在还没答荣和的人前头要牌）
 //   unreachable:        库内部状态不一致；按 API 使用不会遇到，遇到就是 bug
@@ -18,6 +19,7 @@ export type MahjongErrorCode =
   | 'tedashi-drawn-tile'
   | 'not-candidate'
   | 'riichi-not-tenpai'
+  | 'kuikae'
   | 'prompt-done'
   | 'out-of-order'
   | 'unreachable'

@@ -1,5 +1,5 @@
 import { Decomposed, decompose, shanten } from './tenpai'
-import { MahjongError, TileKind, compareTileKind, createEmptyCounts, group, nextId, shimocha, shuffle, toTileKinds, uniqTileKinds } from './utils'
+import { MahjongError, TileKind, compareTileKind, createEmptyCounts, group, nextId, shimocha, shuffle, toMPSZ, toTileKinds, uniqTileKinds } from './utils'
 import { HoraResult, canHora, yaku } from './yaku'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
@@ -11,6 +11,9 @@ export const playerIds: PlayerId[] = [0, 1, 2, 3]
 
 export type Sangen = 'white' | 'green' | 'red'
 export const sangens: Sangen[] = ['white', 'green', 'red']
+
+// 包（責任払い）的对象役满：大三元 / 大四喜 / 四槓子
+export type PaoYaku = 'daisangen' | 'daisuushii' | 'suukantsu'
 
 export type Suit = 'pin' | 'so' | 'man' | 'kaze' | 'sangen'
 export const suits: Suit[] = ['pin', 'so', 'man', 'kaze', 'sangen']
@@ -49,6 +52,8 @@ export interface Action {
   ponTiles?:    Tile[][]
   // 可杠的候选（明杠/暗杠/加杠合并在一起，看 type 区分）
   kans?:        Kan[]
+  // 食い替え：这几张现在不能打出去（刚吃/碰进来的那张，以及吃的时候同筋的另一端）
+  kuikae?:      TileKind[]
   hora?:        HoraResult
 }
 
@@ -178,11 +183,12 @@ export class Round {
   }
 
   // 这一家"打哪张能听牌"的缓存：摸牌后、吃碰后重算一次，打牌后清空。
-  // 纯性能缓存：一次完整向听分解约 10ms，而一个回合内有三处要用同一份结果
+  // 纯性能缓存：一次完整向听分解约 12ms（numbers 见 tests/scratch-tenpai-bench.ts），
+  // 而一个回合内有三处要用同一份结果
   // （mopai 判断是否听牌、action 的立直/自摸判定、dahai 里算 player.waits）。
+  // 结论：先留着 —— 去掉它等于每回合多跑两次向听分解（≈ +24ms）；
+  // 等向听计算本身做快了（那时缓存就没必要了）再删掉这个缓存。
   // 正确性不依赖它 —— 对外请用 player.tenpaiDiscards() / player.waitsAfterDiscard()，那两个总是现算。
-  // TODO: 以后做性能优化时可以重新评估：要么去掉这个缓存、让三处各自现算（状态更少），
-  //       要么把向听计算本身做快（那时缓存就没必要了）。
   private tenpaiCache: { discard: TileKind, waits: TileKind[] }[] = null
 
   private updateTenpaiCache(): boolean {
@@ -195,6 +201,12 @@ export class Round {
   dahai(tile: Tile, riichi: boolean) {
     const index = this.player.tiles.indexOf(tile)
     if (index === -1) throw new MahjongError('tile-not-in-hand', '打牌: 这张牌不在手牌里')
+    // 食い替え：刚吃/碰进来的那张（吃的话还有同筋的另一端）不能马上打出去
+    if (this.player.kuikae.some(kind => tile.equals(kind))) {
+      const list = this.player.kuikae.map(kind => toMPSZ([kind])).join('/')
+      throw new MahjongError('kuikae', `食い替え: 刚鸣进来的牌不能马上打出去（${list}）`)
+    }
+    this.player.kuikae = []
     // 摸切 = 打出的就是刚摸到的那张（吃碰之后的打牌算手切）
     tile.tsumogiri = !this.kiru && index === this.player.tiles.length - 1
     this.player.tiles.splice(index, 1)
@@ -265,12 +277,14 @@ export class Round {
       player.tiles.splice(index, 1)
     }
     this.player.discards.pop()
-    tiles.push(this.kiru)
+    const called = this.kiru
+    tiles.push(called)
     // 顺子按升序存放：三色同顺/一气通贯靠比较 tiles 数组判断
     player.chi.push(tiles.sort(compareTileKind))
+    player.kuikae = chiKuikae(called, player.chi[player.chi.length - 1])
     this.currentId = id
     this.breakFirstTurnFlags()
-    this.removeRyuukyokuMangan(this.kiru.playerId)
+    this.removeRyuukyokuMangan(called.playerId)
     // 吃没有摸牌，这里补算切牌后的听牌张
     this.updateTenpaiCache()
   }
@@ -284,14 +298,24 @@ export class Round {
       player.tiles.splice(index, 1)
     }
     this.player.discards.pop()
-    tiles.push(this.kiru)
+    const called = this.kiru
+    const discarder = called.playerId
+    tiles.push(called)
     player.pon.push({
       tiles,
       chakan: false,
     })
+    // ポン喰い替え：碰进来的那张不能马上打
+    player.kuikae = [{ suit: called.suit, rank: called.rank }]
+    // 包：三種類目の三元牌 / 四種類目の風牌を鳴らせた人が責任者
+    const kotsu = (suit: Suit) => player.pon.filter(pon => pon.tiles[0].suit === suit).length
+      + player.minkan.filter(tiles => tiles[0].suit === suit).length
+      + player.ankan.filter(tiles => tiles[0].suit === suit).length
+    if (kotsu('sangen') === 3) player.pao.push({ yaku: 'daisangen', playerId: discarder })
+    if (kotsu('kaze') === 4) player.pao.push({ yaku: 'daisuushii', playerId: discarder })
     this.currentId = id
     this.breakFirstTurnFlags()
-    this.removeRyuukyokuMangan(this.kiru.playerId)
+    this.removeRyuukyokuMangan(discarder)
     // 碰没有摸牌，这里补算切牌后的听牌张
     this.updateTenpaiCache()
   }
@@ -312,6 +336,8 @@ export class Round {
     const discarder = this.kiru.playerId
     this.mopai(true, id, true)
     this.kanCount++
+    // 包：四つ目の槓が明槓なら、その牌を切った人が責任者
+    if (this.kanCount === 4) player.pao.push({ yaku: 'suukantsu', playerId: discarder })
     this.breakFirstTurnFlags()
     this.removeRyuukyokuMangan(discarder)
   }
@@ -409,8 +435,8 @@ export class Round {
           action.types.add('ryuukyoku')
         }
       }
-      // 最后一张牌的时候没有杠
-      if (this.rest !== 0 && this.kanCount < 4) {
+      // 最后一张牌的时候没有杠；吃/碰之后也不能杠（要先打一张，kiru 为空才是真的摸牌）
+      if (!this.kiru && this.rest !== 0 && this.kanCount < 4) {
         const ankan = this.player.ankanTiles
         if (this.players[id].riichi) {
           // 立直中只能暗杠"不会改听牌"的那几组（同巡那张摸到的牌能不能杠由向听/分解判断）
@@ -439,6 +465,10 @@ export class Round {
         if (action.kans) {
           action.types.add('kan')
         }
+      }
+      // 食い替え：这几张现在不能打（做 UI / 选牌时避开）
+      if (this.player.kuikae.length !== 0) {
+        action.kuikae = this.player.kuikae
       }
       if (this.tenpaiCache && this.tenpaiCache.length !== 0) {
         // kiru 为空说明这一手是真的摸牌（吃、碰后不是），只有摸牌才能立直/自摸
@@ -534,6 +564,21 @@ export interface Kan {
   tiles: Tile[]
 }
 
+// 吃的食い替え：鸣いた牌そのもの + 手牌の二枚で作れる反対側の牌（同筋）
+// 例：2m3m で 4m を吃 → 4m と 1m は马上切れない；2m4m で 3m（嵌张）なら 3m だけ
+function chiKuikae(called: TileKind, meld: TileKind[]): TileKind[] {
+  const kinds: TileKind[] = [{ suit: called.suit, rank: called.rank }]
+  const [lowest] = meld
+  if (called.rank === lowest.rank) {
+    // 鸣的是顺子最小的一张 → 手牌是 (x+1, x+2)，它们和 x+3 也能成顺子
+    if (lowest.rank + 3 <= 9) kinds.push({ suit: lowest.suit, rank: lowest.rank + 3 })
+  } else if (called.rank === lowest.rank + 2) {
+    // 鸣的是最大的一张 → 手牌是 (x, x+1)，它们和 x-1 也能成顺子
+    if (lowest.rank - 1 >= 1) kinds.push({ suit: lowest.suit, rank: lowest.rank - 1 })
+  }
+  return kinds
+}
+
 export interface Riichi {
   double: boolean
   iipatsu: boolean
@@ -551,6 +596,11 @@ export class Player {
 
   // 打牌时设置
   waits: TileKind[]
+
+  // 食い替え：刚吃/碰进来的那张（以及同筋的另一端）不能马上打出去，打完之后清空
+  kuikae: TileKind[] = []
+  // 包（責任払い）：大三元 / 大四喜 / 四槓子 被鸣确定时，记下是谁"喂"的
+  pao: { yaku: PaoYaku, playerId: PlayerId }[] = []
 
   dojunfuriten = false
   // 已切的牌，用于计算舍张振听
