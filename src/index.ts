@@ -8,12 +8,9 @@ export * from './utils'
 export * from './yaku'
 
 // 规则补充（调用方会碰到的）：
-// - 食い替え禁止：吃/碰之后不能马上打回刚鸣的那张（吃的话，同筋的另一端也不行），
-//   当前不能打的牌挂在 ctx.kuikae 上；硬打会抛 MahjongError('kuikae')
-// - 吃、碰之后这一巡不能杠（要先打一张），所以那一家拿到的 ctx.types 里不会有 kan
-// - 包（責任払い）：大三元 / 大四喜 / 四槓子 被鸣确定后和了这手役满，
-//   点数全由责任者一个人付（MahjongEnd.hora[].pao 里记着是谁）——
-//   这条默认为**关**（new Mahjong({ pao: true }) 才生效）
+// - 食い替え禁止：刚鸣的那张（吃的话还有同筋的另一端）不能马上打，挂在 ctx.kuikae 上
+// - 吃、碰之后这一巡不能杠（所以要先把 ctx.types 里的 kan 当成"摸牌后才可能有"）
+// - 包（責任払い）默认关，见 MahjongOptions.pao
 //
 // 牌局由调用方"拉"着走：
 //
@@ -91,7 +88,6 @@ export type Step = Prompt | RoundEnd
 //   suukansanra  四槓散了
 export type RyuukyokuType = 'hoapai' | 'kyuushu' | 'suuchaRiichi' | 'sufurenda' | 'suukansanra'
 
-// 一局结束的结果：和牌（可多家，含每个和牌者的役与点数）或流局
 export class MahjongEnd {
   type: 'hora' | 'ryuukyoku'
   // 和牌者（可多家）：和牌结果（役与基本点）加上这一家实际收/付的点数
@@ -107,7 +103,7 @@ export class MahjongEnd {
   }
 }
 
-// 一家的决策：交给 playDecisions 执行（库负责荣和优先、多家荣和、座位顺序、全跳过才继续摸牌）
+// 一家的决策：提交给 Prompt.apply(ctx, decision)
 export type Decision =
   | { action: 'ron' }
   | { action: 'tsumo' }
@@ -140,13 +136,8 @@ export class Mahjong {
   homba = 0
   // 桌上已有的立直棒数量（每根 1000 点，和牌者收）
   riichibo = 0
-  // 最近一次结束的结果
   lastEnd: MahjongEnd
-  // 多家荣和的规则：
-  //   false = 頭ハネ（默认）：只有离放铳者最近的那家和牌，其他家不算和
-  //   true  = 每家和牌者都收（天鳳・雀魂风格；本場棒/立直棒仍然只给最近的赢家）
   multipleRon = false
-  // 包（責任払い）开关：见 MahjongOptions.pao（默认不包）
   pao = false
 
   // 下一个要交给调用方的 step（一个询问，或一次局终）
@@ -292,7 +283,6 @@ export class Mahjong {
     }
   }
 
-  // 执行一家的动作（调用方通过 Prompt.apply 提交，不直接调）
   private applyDecision(ctx: MahjongContext, decision: Decision) {
     switch (decision.action) {
       case 'tedashi': return this.tedashi(ctx, decision.tile, decision.riichi)
@@ -331,7 +321,6 @@ export class Mahjong {
     this.discard(ctx, tile, riichi)
   }
 
-  // 摸切：打刚摸到的那张（吃、碰之后没有刚摸的牌，只能手切）
   private tsumogiri(ctx: MahjongContext, riichi?: boolean) {
     if (!ctx.types.has('tsumogiri')) throw new MahjongError('action-not-allowed', '摸切: 现在不能摸切（吃过、碰过之后请用手切）')
     this.discard(ctx, ctx.player.tiles.at(-1), riichi)
@@ -362,7 +351,6 @@ export class Mahjong {
     return pick
   }
 
-  // 报错时用哪种杠的说法
   private what(kan: Kan) {
     return { minkan: '明杠', ankan: '暗杠', chakan: '加杠' }[kan?.type] ?? '杠'
   }
@@ -374,7 +362,6 @@ export class Mahjong {
     this.next()
   }
 
-  // 碰也不摸牌（和吃同理）
   private pon(ctx: MahjongContext, candidate: Tile[]) {
     if (!ctx.types.has('pon')) throw new MahjongError('action-not-allowed', '碰: 现在不能碰')
     this.round.pon(ctx.player.id, this.candidate(ctx.ponTiles, candidate, '碰'))
@@ -504,14 +491,12 @@ export class Mahjong {
         const basePoints = 2000
         for (const id of mangan) {
           if (this.round.players[id].isDealer) {
-            // 庄家流满
             this.score[id] += 6 * basePoints
             for (const other of playerIds) {
               if (other === id) continue
               this.score[other] -= 2 * basePoints
             }
           } else {
-            // 闲家流满
             this.score[id] += 4 * basePoints
             for (const other of playerIds) {
               if (other === id) continue
@@ -682,7 +667,6 @@ export class Mahjong {
   }
   
   private createRound(dealer: PlayerId) {
-    // 按当前场风与庄家开新的一局，牌山交给 createTiles（不传则用默认打乱的一副）
     this.round = new Round(this.bakaze, dealer, this.createTiles?.(dealer, this.kyoku, this.homba))
   }
 }

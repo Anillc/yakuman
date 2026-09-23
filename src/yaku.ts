@@ -13,16 +13,12 @@ export interface Yaku {
   fu: number
   fan: number
 
-  // 一番
   // 立直 (门前清)
   riichi?: 1
-  // 断幺九
   tanyao?: 1
   // 门前清自摸 (门前清)
   tsumo?: 1
-  // 场风
   bakaze?: 1
-  // 自风
   jikaze?: 1
   // 白
   white?: 1
@@ -34,39 +30,22 @@ export interface Yaku {
   pinfu?: 1
   // 一杯口 (门前清)
   iipeikou?: 1
-  // 抢杠
   chankan?: 1
   // 岭上
   rinshan?: 1
-  // 海底
   haitei?: 1
-  // 河底
   hotei?: 1
-  // 一发
   ippatsu?: 1
-  // 宝牌
   dora?: number
-  // 红宝牌
   reddora?: number
-  // 里宝牌
   uradora?: number
-  // 北宝牌
-  // peidora
-
-  // 两番
   // 双立直 (门前清)
   doubleRiichi?: 2
-  // 三色同刻
   sanshokuDoukou?: 2
-  // 三杠子
   sankantsu?: 2
-  // 对对和
   toitoi?: 2
-  // 三暗刻
   sanankou?: 2
-  // 小三元
   shousangen?: 2
-  // 混老头
   honroutou?: 2
   // 七对子 (门前清)
   chiitoitsu?: 2
@@ -78,7 +57,6 @@ export interface Yaku {
   sanshokuDoujun?: 1 | 2
 
 
-  // 三番
   // 两杯口 (门前清)
   ryanpeikou?: 3
   // 纯全带幺九 (副露减一番)
@@ -87,7 +65,6 @@ export interface Yaku {
   honitsu?: 2 | 3
 
 
-  // 六番
   // 清一色 (副露减一番)
   chinitsu?: 5 | 6
 
@@ -97,7 +74,6 @@ export interface Yaku {
   tenhou?: 13
   // 地和 (子家限定)
   chiihou?: 13
-  // 大三元
   daisangen?: 13
   // 四暗刻 (门前清)
   suuankou?: 13
@@ -105,13 +81,10 @@ export interface Yaku {
   tsuuiisou?: 13
   // 绿一色
   ryuuiisou?: 13
-  // 清老头
   chinroutou?: 13
   // 国士无双 (门前清)
   kokushiMusou?: 13
-  // 小四喜
   shousuushii?: 13
-  // 四杠子
   suukantsu?: 13
   // 九莲宝灯 (门前清)
   chuurenPoutou?: 13
@@ -123,7 +96,6 @@ export interface Yaku {
   kokushiMusou13?: 26
   // 纯正九莲宝灯 (门前清)
   junseiChuurenPoutou?: 26
-  // 大四喜
   daisuushii?: 26
 }
 
@@ -164,7 +136,6 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
   if (!isTsumo && player.naki === 0) {
     yaku.fu += 10
   } else if (isTsumo && player.naki === 0) {
-    // 门前清自摸
     yaku.tsumo = 1
     yaku.fu += 2
     if (round.firstTurnIntact) {
@@ -181,8 +152,6 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
     handTiles, player.chi, player.pon.map(pon => pon.tiles),
     player.minkan, player.ankan, horaTile,
   ].flat(2)
-
-  // 立直
   if (player.riichi) {
     if (player.naki !== 0) throw new MahjongError('unreachable', '立直: 有副露的人不能立直')
     if (player.riichi.double) {
@@ -190,14 +159,10 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
     } else {
       yaku.riichi = 1
     }
-    // 一发
     if (player.riichi.iipatsu) {
       yaku.ippatsu = 1
     }
   }
-
-
-  // 断幺九
   let isTanyao = true
   for (const tile of allTiles) {
     if (['man', 'so', 'pin'].includes(tile.suit)) {
@@ -214,31 +179,23 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
   if (isTanyao) {
     yaku.tanyao = 1
   }
-
-  // 抢杠
   if (isChankan) {
     yaku.chankan = 1
   }
-
-  // 岭上开花（杠后补牌自摸）
   if (isTsumo && round.rinshan) {
     yaku.rinshan = 1
   }
 
   if (round.rest === 0) {
     if (isTsumo) {
-      // 海底
       // 岭上补的不是牌山最后一张，所以不叠加海底
       if (!round.rinshan) {
         yaku.haitei = 1
       }
     } else {
-      // 河底
       yaku.hotei = 1
     }
   }
-
-  // 宝牌
   const dorahyoji = round.dorahyoji
   const dora: TileKind[] = dorahyoji[0].map(({ suit, rank }) => {
     if (['man', 'so', 'pin'].includes(suit)) {
@@ -255,7 +212,6 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
       if (compareTileKind(tile, d) === 0) yaku.dora++
     }
   }
-  // 里宝牌
   if (player.riichi) {
     const uradora: TileKind[] = dorahyoji[1].map(({ suit, rank }) => {
       if (['man', 'so', 'pin'].includes(suit)) {
@@ -273,19 +229,14 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
       }
     }
   }
-  // 红宝牌
   for (const tile of allTiles) {
     if (tile instanceof Tile && tile.red) {
       yaku.reddora ||= 0
       yaku.reddora++
     }
   }
-
-  // 混老头
   let isHonroto = true
-  // 清老头
   let isChinroto = true
-  // 至少应该要有数牌
   let hasSuitTiles = false
   for (const tile of allTiles) {
     if (['man', 'so', 'pin'].includes(tile.suit)) {
@@ -306,10 +257,7 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
       yaku.honroutou = 2
     }
   }
-
-  // 混一色
   let isHonitsu = true
-  // 清一色
   let isChinitsu = true
   let flushSuit: Suit
   for (const tile of allTiles) {
@@ -327,7 +275,6 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
       isChinitsu = false
     }
   }
-  // 至少要有数牌
   if (flushSuit) {
     if (player.naki === 0) {
       if (isChinitsu) {
@@ -342,9 +289,6 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
         yaku.honitsu = 2
       }
     }
-
-    // 九莲宝灯
-    // 纯正九莲宝灯
     if (isChinitsu && player.naki === 0) {
       const counts = group(allTiles)[flushSuit]
       const counts13 = group(handTiles)[flushSuit]
@@ -381,17 +325,14 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
 
   // 与牌型相关的役
   if (handType === 'chiitoitsu') {
-    // 七对子
     yaku.chiitoitsu = 2
     yaku.fu = 25
   }
   if (handType === 'kokushiMusou') {
-    // 国士无双
     yaku.kokushiMusou = 13
     yaku.fu = 25
   }
   if (handType === 'kokushiMusou13') {
-    // 国士无双十三面
     yaku.kokushiMusou13 = 26
     yaku.fu = 25
   }
@@ -589,22 +530,17 @@ function normalYaku(
   const shuntsu = mentsu.filter(mentsu => mentsu.type === 'shuntsu')
 
   for (const block of kotsu) {
-    // 场风
     if (block.suit === 'kaze' && kazes[block.tiles[0] - 1] === round.bakaze) {
       result.bakaze = 1
     }
-    // 自风
     // 自风（庄家为东，随庄家轮转）
     if (block.suit === 'kaze' && kazes[block.tiles[0] - 1] === player.seatWind) {
       result.jikaze = 1
     }
-    // 白发中
     if (block.suit === 'sangen') {
       result[sangens[block.tiles[0] - 1]] = 1
     }
   }
-
-  // 平和
   let yakuhaiPair = false
   if (toitsu[0].suit === 'sangen') {
     yakuhaiPair = true
@@ -632,8 +568,6 @@ function normalYaku(
       result.fu += 10
     }
   }
-
-  // 一杯口/两杯口
   if (player.naki === 0) {
     let count = 0
     const restShuntsu = [...shuntsu]
@@ -652,8 +586,6 @@ function normalYaku(
       result.ryanpeikou = 3
     }
   }
-
-  // 三色同刻
   const restKotsu = [...kotsu]
   if (restKotsu.length >= 3) {
     let block: Block
@@ -673,56 +605,39 @@ function normalYaku(
       }
     }
   }
-
-  // 三杠子
   if (player.minkan.length + player.ankan.length === 3) {
     result.sankantsu = 2
   }
-  
-  // 四杠子
   if (player.minkan.length + player.ankan.length === 4) {
     result.suukantsu = 13
   }
-
-  // 对对和
   if (kotsu.length === 4) {
     result.toitoi = 2
   }
-
-  // 三暗刻
   if (anko === 3) {
     result.sanankou = 2
   }
 
   if (anko === 4) {
     if (tanki) {
-      // 四暗刻单骑
       result.suuankouTanki = 26
     } else {
-      // 四暗刻
       result.suuankou = 13
     }
   }
 
   const sangenMentsu = mentsu.filter(mentsu => mentsu.suit === 'sangen')
   const sangenToitsu = toitsu.filter(toitsu => toitsu.suit === 'sangen')
-
-  // 小三元
   if (sangenMentsu.length === 2 && sangenToitsu.length === 1) {
     result.shousangen = 2
   }
-
-  // 大三元
   if (sangenMentsu.length === 3) {
     result.daisangen = 13
   }
 
   if (!(result.honroutou || result.chinroutou)) {
-    // 混全带幺九
     let chanta = true
-    // 纯全带幺九
     let junchan = true
-    // 至少要有数牌
     let hasSuitMentsu = false
     for (const mt of mentsu) {
       if (['man', 'so', 'pin'].includes(mt.suit)) {
@@ -752,8 +667,6 @@ function normalYaku(
       }
     }
   }
-
-  // 一气通贯
   for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
     const suitShuntsu = shuntsu.filter(shuntsu => shuntsu.suit === suit)
     const low = suitShuntsu.find(shuntsu => shuntsu.tiles[0] === 1)
@@ -768,8 +681,6 @@ function normalYaku(
       break
     }
   }
-
-  // 三色同顺
   const restShuntsu = [...shuntsu]
   if (restShuntsu.length >= 3) {
     let block: Block
@@ -796,13 +707,9 @@ function normalYaku(
 
   const kazeKotsu = kotsu.filter(kotsu => kotsu.suit === 'kaze')
   const kazeToitsu = toitsu[0].suit === 'kaze'
-
-  // 小四喜
   if (kazeKotsu.length === 3 && kazeToitsu) {
     result.shousuushii = 13
   }
-
-  // 大四喜
   if (kazeKotsu.length === 4) {
     result.daisuushii = 26
   }

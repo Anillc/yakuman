@@ -65,7 +65,6 @@ export class Round {
   players: Player[]
   currentId: PlayerId = 0
 
-  // 巡
   turn: number = 0
   // 上一张被切/被鸣的牌（摸牌后清空）
   kiru: Tile = null
@@ -82,7 +81,6 @@ export class Round {
   constructor (
     // 场风
     public bakaze: Kaze,
-    // 庄家（本局是谁坐庄，用玩家编号）
     public dealer: PlayerId,
     tiles?: Tile[],
   ) {
@@ -182,13 +180,8 @@ export class Round {
     return this.updateTenpaiCache()
   }
 
-  // 这一家"打哪张能听牌"的缓存：摸牌后、吃碰后重算一次，打牌后清空。
-  // 纯性能缓存：一次完整向听分解约 12ms（numbers 见 tests/scratch-tenpai-bench.ts），
-  // 而一个回合内有三处要用同一份结果
-  // （mopai 判断是否听牌、action 的立直/自摸判定、dahai 里算 player.waits）。
-  // 结论：先留着 —— 去掉它等于每回合多跑两次向听分解（≈ +24ms）；
-  // 等向听计算本身做快了（那时缓存就没必要了）再删掉这个缓存。
-  // 正确性不依赖它 —— 对外请用 player.tenpaiDiscards() / player.waitsAfterDiscard()，那两个总是现算。
+  // "打哪张能听牌"的缓存：摸牌后、吃碰后重算，打牌后清空。纯性能缓存（一次向听分解约 12ms，
+  // 一个回合有三处要用，见 tests/scratch-tenpai-bench.ts）；正确性不依赖它，等向听算法变快再删。
   private tenpaiCache: { discard: TileKind, waits: TileKind[] }[] = null
 
   private updateTenpaiCache(): boolean {
@@ -197,11 +190,9 @@ export class Round {
     return options.length !== 0
   }
 
-  // 打牌
   dahai(tile: Tile, riichi: boolean) {
     const index = this.player.tiles.indexOf(tile)
     if (index === -1) throw new MahjongError('tile-not-in-hand', '打牌: 这张牌不在手牌里')
-    // 食い替え：刚吃/碰进来的那张（吃的话还有同筋的另一端）不能马上打出去
     if (this.player.kuikae.some(kind => tile.equals(kind))) {
       const list = this.player.kuikae.map(kind => toMPSZ([kind])).join('/')
       throw new MahjongError('kuikae', `食い替え: 刚鸣进来的牌不能马上打出去（${list}）`)
@@ -305,7 +296,6 @@ export class Round {
       tiles,
       chakan: false,
     })
-    // ポン喰い替え：碰进来的那张不能马上打
     player.kuikae = [{ suit: called.suit, rank: called.rank }]
     // 包：三種類目の三元牌 / 四種類目の風牌を鳴らせた人が責任者
     const kotsu = (suit: Suit) => player.pon.filter(pon => pon.tiles[0].suit === suit).length
@@ -466,7 +456,6 @@ export class Round {
           action.types.add('kan')
         }
       }
-      // 食い替え：这几张现在不能打（做 UI / 选牌时避开）
       if (this.player.kuikae.length !== 0) {
         action.kuikae = this.player.kuikae
       }
@@ -496,7 +485,6 @@ export class Round {
       if (justDrew) action.types.add('tsumogiri')
       return action
     } else {
-      // 刚打出牌
       if (id === this.currentId) return null
       const action: Action = { types: new Set() }
       const waits = this.players[id].waits
@@ -551,7 +539,6 @@ export class Round {
 
 interface Pon {
   tiles: Tile[]
-  // 加杠
   chakan: boolean
 }
 
@@ -564,13 +551,13 @@ export interface Kan {
   tiles: Tile[]
 }
 
-// 吃的食い替え：鸣いた牌そのもの + 手牌の二枚で作れる反対側の牌（同筋）
-// 例：2m3m で 4m を吃 → 4m と 1m は马上切れない；2m4m で 3m（嵌张）なら 3m だけ
+// 吃的食い替え：刚鸣的那张 + 手牌两张能凑出的另一端（同筋）
+// 例：2m3m 吃 4m → 4m/1m 都不能马上打；2m4m（嵌张）吃 3m → 只有 3m 不能打
 function chiKuikae(called: TileKind, meld: TileKind[]): TileKind[] {
   const kinds: TileKind[] = [{ suit: called.suit, rank: called.rank }]
   const [lowest] = meld
   if (called.rank === lowest.rank) {
-    // 鸣的是顺子最小的一张 → 手牌是 (x+1, x+2)，它们和 x+3 也能成顺子
+    // 鸣的是最小的一张 → 手牌是 (x+1, x+2)，它们和 x+3 也能成顺子
     if (lowest.rank + 3 <= 9) kinds.push({ suit: lowest.suit, rank: lowest.rank + 3 })
   } else if (called.rank === lowest.rank + 2) {
     // 鸣的是最大的一张 → 手牌是 (x, x+1)，它们和 x-1 也能成顺子
@@ -590,11 +577,10 @@ export class Player {
   pon: Pon[]       = []
   minkan: Tile[][] = []
   ankan: Tile[][]  = []
-  // 牌河
   discards: Tile[] = []
   riichi: Riichi
 
-  // 打牌时设置
+  // 听牌张（打完牌之后算出来）
   waits: TileKind[]
 
   // 食い替え：刚吃/碰进来的那张（以及同筋的另一端）不能马上打出去，打完之后清空
@@ -610,7 +596,6 @@ export class Player {
 
   constructor(
     public round: Round,
-    // 玩家的编号（ton/nan/sha/pei 只是名字，不代表自风；自风请用 round.seatWind(id)）
     public id: PlayerId,
     public tiles: Tile[],
   ) {}
@@ -640,7 +625,6 @@ export class Player {
       .map(({ discard, waits }) => ({ discard, waits }))
   }
 
-  // 打这张之后听什么；不听牌则 null
   waitsAfterDiscard(tileKind: TileKind): TileKind[] | null {
     return this.tenpaiDiscards()
       .find(option => compareTileKind(option.discard, tileKind) === 0)?.waits ?? null
@@ -656,7 +640,6 @@ export class Player {
     return this.round.seatWind(this.id)
   }
 
-  // 本局是不是庄家
   get isDealer(): boolean {
     return this.round.dealer === this.id
   }
@@ -687,7 +670,6 @@ export class Player {
     }
     return chizai
   }
-  // 碰材
   get ponTiles() {
     const current = this.round.kiru
     const ponzai: Tile[][] = []
@@ -699,14 +681,12 @@ export class Player {
     }
     return ponzai
   }
-  // 明杠
   // （以下是三种杠各自的原始候选；ctx 会把它们合成 ctx.kans）
   get minkanTiles() {
     const current = this.round.kiru
     const same = this.tiles.filter((tile) => tile.equals(current))
     return same.length === 3 ? [same] : []
   }
-  // 暗杠
   get ankanTiles() {
     const tiles = [...this.tiles]
     const group: Tile[][] = []
@@ -722,7 +702,6 @@ export class Player {
     }
     return group.filter(same => same.length === 4)
   }
-  // 加杠
   get chakanTiles() {
     const result: Tile[] = []
     for (const pon of this.pon) {

@@ -283,7 +283,7 @@ function isolate(counts: Counts): [
   return [blocks, isolated, counts]
 }
 
-// 计算面子与雀头
+// 雀头：对子的分解
 function jantou(counts: Counts) {
   counts = cloneCounts(counts)
   const results = new DecomposedSet()
@@ -308,7 +308,6 @@ function jantou(counts: Counts) {
   return results
 }
 
-// 计算面子
 function mentsu(counts: Counts): DecomposedSet {
   counts = cloneCounts(counts)
   const results: NumberDecomposedSet[] = []
@@ -445,7 +444,6 @@ function toitsu(tiles: number[], suit: Suit, slots: number): NumberDecomposedSet
   return results
 }
 
-// 两面和边张
 function ryammen(tiles: number[], suit: Suit, slots: number): NumberDecomposedSet {
   const results = new NumberDecomposedSet()
   if (slots === 0) {
