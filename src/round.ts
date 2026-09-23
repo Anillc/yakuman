@@ -19,11 +19,8 @@ export class Tile implements TileKind {
   riichi = false
   // 这张牌是摸切打出去的（false = 手切；吃碰之后的打牌也算手切）
   tsumogiri = false
-  from: {
-    // 巡
-    turn?: number
-    playerId?: PlayerId
-  } = {}
+  // 这张牌是从谁那里来的：摸到的就是摸牌的人，打出去之后就是放铳/被鸣的那一家
+  playerId?: PlayerId
 
   constructor(
     public suit: Suit,
@@ -50,9 +47,8 @@ export interface Action {
   types: Set<ActionType>
   chiTiles?:    Tile[][]
   ponTiles?:    Tile[][]
-  minkanTiles?: Tile[][]
-  ankanTiles?:  Tile[][]
-  chakanTiles?: Tile[]
+  // 可杠的候选（明杠/暗杠/加杠合并在一起，看 type 区分）
+  kans?:        Kan[]
   hora?:        HoraResult
 }
 
@@ -113,7 +109,7 @@ export class Round {
     }
     function setPlayerId(tiles: Tile[], id: PlayerId) {
       for (const tile of tiles) {
-        tile.from.playerId = id
+        tile.playerId = id
       }
       return tiles
     }
@@ -159,7 +155,7 @@ export class Round {
   mopai(keepTurn?: boolean, id?: PlayerId, isRinshan?: boolean): boolean {
     id ??= nextId(this.currentId)
     const tile = this.haiyama.shift()
-    tile.from.playerId = id
+    tile.playerId = id
     this.players[id].tiles.push(tile)
     // 摸牌后上一张打出的牌就作废了（否则杠后补牌会被当成"刚打过牌"）
     this.kiru = null
@@ -195,7 +191,6 @@ export class Round {
     // 摸切 = 打出的就是刚摸到的那张（吃碰之后的打牌算手切）
     tile.tsumogiri = !this.kiru && index === this.player.tiles.length - 1
     this.player.tiles.splice(index, 1)
-    tile.from.turn = this.turn
     this.kiru = tile
     this.player.discards.push(tile)
     this.player.discardCounts[tile.suit][tile.rank - 1]++
@@ -258,7 +253,6 @@ export class Round {
     const id = nextId(this.currentId)
     const player = this.players[id]
     for (const tile of tiles) {
-      tile.from.turn = this.turn
       const index = player.tiles.indexOf(tile)
       if (index === -1) throw new MahjongError('tile-not-in-hand', '吃: 这张牌不在手牌里')
       player.tiles.splice(index, 1)
@@ -269,7 +263,7 @@ export class Round {
     player.chi.push(tiles.sort(compareTileKind))
     this.currentId = id
     this.breakFirstTurnFlags()
-    this.removeRyuukyokuMangan(this.kiru.from.playerId)
+    this.removeRyuukyokuMangan(this.kiru.playerId)
     // 吃没有摸牌，这里补算切牌后的听牌张
     this.updateTenpaiCache()
   }
@@ -278,7 +272,6 @@ export class Round {
     tiles = [...tiles]
     const player = this.players[id]
     for (const tile of tiles) {
-      tile.from.turn = this.turn
       const index = player.tiles.indexOf(tile)
       if (index === -1) throw new MahjongError('tile-not-in-hand', '碰: 这张牌不在手牌里')
       player.tiles.splice(index, 1)
@@ -291,7 +284,7 @@ export class Round {
     })
     this.currentId = id
     this.breakFirstTurnFlags()
-    this.removeRyuukyokuMangan(this.kiru.from.playerId)
+    this.removeRyuukyokuMangan(this.kiru.playerId)
     // 碰没有摸牌，这里补算切牌后的听牌张
     this.updateTenpaiCache()
   }
@@ -300,7 +293,6 @@ export class Round {
     tiles = [...tiles]
     const player = this.players[id]
     for (const tile of tiles) {
-      tile.from.turn = this.turn
       const index = player.tiles.indexOf(tile)
       if (index === -1) throw new MahjongError('tile-not-in-hand', '明杠: 这张牌不在手牌里')
       player.tiles.splice(index, 1)
@@ -310,7 +302,7 @@ export class Round {
     player.minkan.push(tiles)
 
     // 摸牌会把 kiru 清空，先记住放铳者是谁
-    const discarder = this.kiru.from.playerId
+    const discarder = this.kiru.playerId
     this.mopai(true, id, true)
     this.kanCount++
     this.breakFirstTurnFlags()
@@ -321,7 +313,6 @@ export class Round {
   ankan(tiles: Tile[]) {
     tiles = [...tiles]
     for (const tile of tiles) {
-      tile.from.turn = this.turn
       const index = this.player.tiles.indexOf(tile)
       if (index === -1) throw new MahjongError('tile-not-in-hand', '暗杠: 这张牌不在手牌里')
       this.player.tiles.splice(index, 1)
@@ -333,7 +324,6 @@ export class Round {
   }
 
   chakan(tile: Tile) {
-    tile.from.turn = this.turn
     const pon = this.player.pon.find(pon => pon.tiles[0].equals(tile))
     if (!pon) throw new MahjongError('not-candidate', '加杠: 这张牌没有对应的碰')
     if (!this.player.tiles.includes(tile)) throw new MahjongError('tile-not-in-hand', '加杠: 这张牌不在手牌里')
@@ -392,11 +382,11 @@ export class Round {
     return rest
   }
 
-  // kiru.from.playerId === currentSeat：这一家就是最后打牌的人，已经打过牌了，在等别人响应
+  // kiru.playerId === currentSeat：这一家就是最后打牌的人，已经打过牌了，在等别人响应
   // 否则：这一家还没打牌（刚摸完牌，或刚吃/碰完），由他们打牌
   // 返回 null 则为不需要操作
   action(id: PlayerId, isChankan?: boolean, isAnkanChankan?: boolean): Action {
-    const beforeDiscard = !this.kiru || this.kiru.from.playerId !== this.currentId
+    const beforeDiscard = !this.kiru || this.kiru.playerId !== this.currentId
     if (beforeDiscard) {
       if (id !== this.currentId) return null
       const action: Action = { types: new Set() }
@@ -416,27 +406,31 @@ export class Round {
       if (this.rest !== 0 && this.kanCount < 4) {
         const ankan = this.player.ankanTiles
         if (this.players[id].riichi) {
-          const riichiAnkan = ankan.filter(ankan => {
+          // 立直中只能暗杠"不会改听牌"的那几组（同巡那张摸到的牌能不能杠由向听/分解判断）
+          const riichiAnkan = ankan.filter(tiles => {
             return this.players[id].riichi.decomposed.every(dec => {
               return dec.blocks.find(block => block.type === 'kotsu'
-                && ankan[0].equals(block.suit, block.tiles[0]))
+                && tiles[0].equals(block.suit, block.tiles[0]))
             })
           })
           if (riichiAnkan.length !== 0) {
-            action.types.add('kan')
-            action.ankanTiles = riichiAnkan
+            action.kans = riichiAnkan.map(tiles => ({ type: 'ankan', tiles }))
           }
         } else {
           if (ankan.length !== 0) {
-            action.types.add('kan')
-            action.ankanTiles = ankan
+            action.kans = ankan.map(tiles => ({ type: 'ankan', tiles }))
           }
         }
         const chakan = this.player.chakanTiles
         if (chakan.length !== 0) {
           if (this.players[id].riichi) throw new MahjongError('unreachable', '加杠: 立直中不能加杠')
+          action.kans = [
+            ...action.kans ?? [],
+            ...chakan.map((tile): Kan => ({ type: 'chakan', tiles: [tile] })),
+          ]
+        }
+        if (action.kans) {
           action.types.add('kan')
-          action.chakanTiles = chakan
         }
       }
       if (this.tenpaiCache && this.tenpaiCache.length !== 0) {
@@ -498,7 +492,7 @@ export class Round {
         const minkan = this.players[id].minkanTiles
         if (minkan.length !== 0 && this.kanCount < 4) {
           action.types.add('kan')
-          action.minkanTiles = minkan
+          action.kans = minkan.map(tiles => ({ type: 'minkan', tiles }))
         }
         if (id === nextId(this.currentId)) {
           const chi = this.players[id].chiTiles
@@ -522,6 +516,15 @@ interface Pon {
   tiles: Tile[]
   // 加杠
   chakan: boolean
+}
+
+// 可杠的候选：tiles 是"要用掉的手牌"
+// - minkan 明杠：手里 3 张 + 别人打出的那张
+// - ankan  暗杠：手里 4 张
+// - chakan 加杠：手里 1 张，加到已有的碰上
+export interface Kan {
+  type: 'minkan' | 'ankan' | 'chakan'
+  tiles: Tile[]
 }
 
 export interface Riichi {
@@ -640,6 +643,7 @@ export class Player {
     return ponzai
   }
   // 明杠
+  // （以下是三种杠各自的原始候选；ctx 会把它们合成 ctx.kans）
   get minkanTiles() {
     const current = this.round.kiru
     const same = this.tiles.filter((tile) => tile.equals(current))

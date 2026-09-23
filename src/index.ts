@@ -1,4 +1,4 @@
-import { Action, ActionType, Kaze, Player, PlayerId, Round, Tile, playerIds } from './round'
+import { Action, ActionType, Kan, Kaze, Player, PlayerId, Round, Tile, playerIds } from './round'
 import { MahjongError, nextId, shimocha } from './utils'
 import { HoraResult } from './yaku'
 
@@ -12,22 +12,20 @@ export * from './yaku'
 // - 吃、碰之后不能杠（加杠/暗杠）
 // - 包牌（大三元、大四喜、四杠子等的责任支付）
 //
-// 注意：轮到谁操作时都要在 callback 里给出一个动作（或者全部跳过时调用 cancel），
+// 注意：轮到谁操作时都要在 callback 里给出一个动作（或者全部跳过时调用 pass），
 // 否则牌局会停在原地 —— 调用方的责任。
 // 另外这两件事由库保证：动作必须是 ctx.types 里有的、候选必须来自 ctx 给出的候选列表；
 // 误用一律抛 MahjongError（code 一览见 utils.ts）。
 
 // 某一家当前可以做的操作。
-// types 里是该家可用的动作，候选（能吃/碰/杠的牌组、和牌的役与基本点）挂在对应字段上。
-// 调用方从 ctx 里选一个方法执行：tedashi / tsumogiri / chi / pon / minkan / ankan / chakan / ryuukyoku，
+// types 里是该家可用的动作，候选（能吃/碰的牌组、能杠的 kans、和牌的役与基本点）挂在对应字段上。
+// 调用方从 ctx 里选一个方法执行：tedashi / tsumogiri / chi / pon / kan / ryuukyoku，
 // 和牌则调用 ctx.ron() 或 ctx.tsumo()（多家荣和才需要 mahjong.ron([...])）。
 export class MahjongContext implements Action {
   types: Set<ActionType>
   chiTiles?: Tile[][]
   ponTiles?: Tile[][]
-  minkanTiles?: Tile[][]
-  ankanTiles?: Tile[][]
-  chakanTiles?: Tile[]
+  kans?: Kan[]
   hora?: HoraResult
 
   round: Round
@@ -85,19 +83,24 @@ export class MahjongContext implements Action {
     this.round.dahai(tile, riichi)
     // 打完之后问其余三家要不要吃碰杠和，并顺带判定四家立直 / 四风连打
     if (riichi && this.round.players.every(player => player.riichi)) {
-      this.mahjong.end({ type: 'ryuukyoku', ryuukyoku: { type: '四家立直' } })
+      this.mahjong.end({ type: 'ryuukyoku', ryuukyoku: { type: 'suuchaRiichi' } })
     } else if (this.round.sufurenda === true) {
-      this.mahjong.end({ type: 'ryuukyoku', ryuukyoku: { type: '四风连打' } })
+      this.mahjong.end({ type: 'ryuukyoku', ryuukyoku: { type: 'sufurenda' } })
     } else {
       this.mahjong.naki()
     }
   }
 
-  // 吃碰杠都直接传候选本身（chiTiles / ponTiles / minkanTiles / ankanTiles / chakanTiles 里的那一项）。
+  // 吃碰杠都直接传候选本身（chiTiles / ponTiles / kans 里的那一项）。
   // 库用同一性校验：不在候选列表里（或拿着过期的候选）就抛错。
   private candidate<T>(list: T[] | undefined, pick: T, what: string): T {
     if (!list?.includes(pick)) throw new MahjongError('not-candidate', `${what}: 这个候选不在候选列表里`)
     return pick
+  }
+
+  // 报错时用哪种杠的说法
+  private what(kan: Kan) {
+    return { minkan: '明杠', ankan: '暗杠', chakan: '加杠' }[kan?.type] ?? '杠'
   }
 
   // 吃、碰都不摸牌：更新牌局状态后直接 next()，由这家自己打一张
@@ -118,30 +121,26 @@ export class MahjongContext implements Action {
     this.mahjong.next()
   }
 
-  // 明杠的补牌在 Round.minkan 里，所以这里同样不用再调 mopai
-  minkan(candidate: Tile[]) {
+  // 杠：传 ctx.kans 里的那一项，type 决定是明杠、暗杠还是加杠
+  // - 明杠补的牌在 Round.minkan 里，所以不用再调 mopai
+  // - 暗杠、加杠先问一圈有没有人抢杠（国士无双可抢暗杠），没人抢才补牌
+  kan(kan: Kan) {
     this.assertFresh()
-    if (!this.types.has('kan')) throw new MahjongError('action-not-allowed', '明杠: 现在不能杠')
-    this.round.minkan(this.player.id, this.candidate(this.minkanTiles, candidate, '明杠'))
-    this.used = true
-    this.mahjong.next()
-  }
-
-  // 暗杠、加杠先问一圈有没有人抢杠（国士无双可抢暗杠），没人抢才补牌
-  ankan(candidate: Tile[]) {
-    this.assertFresh()
-    if (!this.types.has('kan')) throw new MahjongError('action-not-allowed', '暗杠: 现在不能杠')
-    this.round.ankan(this.candidate(this.ankanTiles, candidate, '暗杠'))
-    this.used = true
-    this.mahjong.naki(true, true)
-  }
-
-  chakan(candidate: Tile) {
-    this.assertFresh()
-    if (!this.types.has('kan')) throw new MahjongError('action-not-allowed', '加杠: 现在不能杠')
-    this.round.chakan(this.candidate(this.chakanTiles, candidate, '加杠'))
-    this.used = true
-    this.mahjong.naki(true)
+    if (!this.types.has('kan')) throw new MahjongError('action-not-allowed', `${this.what(kan)}: 现在不能杠`)
+    this.candidate(this.kans, kan, this.what(kan))
+    if (kan.type === 'minkan') {
+      this.round.minkan(this.player.id, kan.tiles)
+      this.used = true
+      this.mahjong.next()
+    } else if (kan.type === 'ankan') {
+      this.round.ankan(kan.tiles)
+      this.used = true
+      this.mahjong.naki(true, true)
+    } else {
+      this.round.chakan(kan.tiles[0])
+      this.used = true
+      this.mahjong.naki(true)
+    }
   }
 
   // 荣和：一般就用这家的 ctx 直接调用；多家荣和（非头跳）才需要 mahjong.ron([...])
@@ -168,12 +167,20 @@ export class MahjongContext implements Action {
     this.mahjong.end({
       type: 'ryuukyoku',
       ryuukyoku: {
-        type: '九种九牌',
+        type: 'kyuushu',
         id: this.player.id,
       },
     })
   }
 }
+
+// 流局的种类（id 用罗马音，方便比较；要给人看请自己准备文案）
+//   hoapai       荒牌流局（牌山摸完）
+//   kyuushu      九種九牌
+//   suuchaRiichi 四家立直
+//   sufurenda    四風連打
+//   suukansanra  四槓散了
+export type RyuukyokuType = 'hoapai' | 'kyuushu' | 'suuchaRiichi' | 'sufurenda' | 'suukansanra'
 
 // 一局结束的结果：和牌（可多家，含每个和牌者的役与点数）或流局
 export class MahjongEnd {
@@ -181,7 +188,7 @@ export class MahjongEnd {
   // 和牌者（可多家）：和牌结果（役与基本点）加上这一家实际收/付的点数
   hora?: ({ type: 'tsumo' | 'ron', id: PlayerId, score: number } & HoraResult)[]
   ryuukyoku?: {
-    type: '荒牌流局' | '九种九牌' | '四家立直' | '四风连打' | '四杠散了'
+    type: RyuukyokuType
     // 荒牌流局
     tenpai?: PlayerId[]
     // 流局满贯
@@ -199,9 +206,7 @@ export type Decision =
   | { action: 'tsumogiri', riichi?: boolean }
   | { action: 'chi', candidate: Tile[] }
   | { action: 'pon', candidate: Tile[] }
-  | { action: 'minkan', candidate: Tile[] }
-  | { action: 'ankan', candidate: Tile[] }
-  | { action: 'chakan', candidate: Tile }
+  | { action: 'kan', kan: Kan }
   | { action: 'ryuukyoku' }
   | { action: 'pass' }
 
@@ -209,8 +214,6 @@ export class Mahjong {
   round: Round
   // 场风（东场 -> 南场 -> 西场）
   bakaze: Kaze = 'ton'
-  // 起家/本局庄家座位，每家轮流坐庄
-  dealer: PlayerId = 0
   kyoku = 1
   score = [25000, 25000, 25000, 25000]
   // 本场棒（每本场 +300 点，和牌者收、放铳者/自摸者付）
@@ -225,8 +228,9 @@ export class Mahjong {
   multipleRon = false
 
   constructor(
-    // 轮到某一家操作时回调：ctxs 是该家（或其余几家）可做的操作，cancel 在全部跳过之后调用
-    public callback: (ctxs: { [id in PlayerId]?: MahjongContext }, cancel: () => void) => void,
+    // 轮到某一家操作时回调：ctxs 是该家（或其余几家）可做的操作，
+    // pass 在"这几家全都不要（不吃碰杠和）"之后调用，库会接着收尾（见 passHandler）
+    public callback: (ctxs: { [id in PlayerId]?: MahjongContext }, pass: () => void) => void,
     // 每局结束时回调，第二个参数表示整场是否还能继续（被飞、西入超分、南四局结束时为 false）。
     // 返回 true = 继续下一局，库会自己接续；返回 false / 不返回 = 停下来，由调用方决定是否 nextRound()。
     public roundEnd: (end: MahjongEnd, canContinue: boolean) => boolean | void,
@@ -236,11 +240,17 @@ export class Mahjong {
     options?: { multipleRon?: boolean },
   ) {
     if (options?.multipleRon !== undefined) this.multipleRon = options.multipleRon
-    this.createRound()
+    // 起家是 0 号，之后由 nextRound() 轮转
+    this.createRound(0)
   }
 
   start() {
     this.next()
+  }
+
+  // 本局的庄家（唯一来源是 round.dealer，外面改不了；起家固定 0 号，之后连庄/轮转都走 nextRound）
+  get dealer(): PlayerId {
+    return this.round.dealer
   }
 
   // 一把打完：用决策回调（playDecisions）打完整场，每局结束自动接续，直到被飞 / 西入超分 / 南四局结束。
@@ -258,10 +268,10 @@ export class Mahjong {
 
   // 用"每家的决策回调"驱动整局：调用方只回答这一家做什么，其余交给库：
   // 1) 荣和优先（可多家同时荣和）；2) 碰、明杠优先于吃；3) 其余按玩家编号顺序；
-  // 4) 全都 pass 才继续摸牌（等价于调用 cancel）。
+  // 4) 全都 pass 才继续摸牌（等价于调用 callback 的 pass）。
   // 注意：同一家在一次询问里可能被问两次（先问荣和，再问吃碰杠）。
   playDecisions(choose: (ctx: MahjongContext) => Decision | undefined) {
-    this.callback = (ctxs, cancel) => {
+    this.callback = (ctxs, pass) => {
       const list = playerIds.map(id => ctxs[id]).filter((ctx): ctx is MahjongContext => ctx !== undefined)
       // 1) 荣和优先，可多家
       const ronners = list.filter(ctx => ctx.types.has('ron') && choose(ctx)?.action === 'ron')
@@ -281,21 +291,19 @@ export class Mahjong {
           case 'tsumogiri': ctx.tsumogiri(decision.riichi); return
           case 'chi': ctx.chi(decision.candidate); return
           case 'pon': ctx.pon(decision.candidate); return
-          case 'minkan': ctx.minkan(decision.candidate); return
-          case 'ankan': ctx.ankan(decision.candidate); return
-          case 'chakan': ctx.chakan(decision.candidate); return
+          case 'kan': ctx.kan(decision.kan); return
           case 'ryuukyoku': ctx.ryuukyoku(); return
         }
       }
-      cancel()
+      pass()
     }
   }
 
-  // 全体跳过（都不吃、碰、杠、和）后的处理：生成传给 callback 的 cancel 回调。
+  // 全体跳过（都不吃、碰、杠、和）后的处理：生成传给 callback 的 pass 回调。
   // 其中"能和却不和"的那几家会在下面记见逃（同巡振听）。
   // 调用方在确认所有 ctx 都放弃后调用它：先检查四杠散了，没散就继续摸牌。
   // drawer 非空表示刚才问的是抢杠（见逃后由这家补一张牌）。
-  passHandler(ctxs: { [id in PlayerId]?: MahjongContext }, drawer?: PlayerId) {
+  private passHandler(ctxs: { [id in PlayerId]?: MahjongContext }, drawer?: PlayerId) {
     return () => {
       if (this.checkKan()) {
         const ron = Object.values(ctxs).filter(ctx => ctx.types.has('ron'))
@@ -315,7 +323,7 @@ export class Mahjong {
     if (ctxs.some(ctx => !ctx.types.has('ron'))) {
       throw new MahjongError('action-not-allowed', '荣和: 这家里有现在不能荣和的人')
     }
-    let closestWinner = this.round.kiru.from.playerId
+    let closestWinner = this.round.kiru.playerId
     while (!ctxs.find(ctx => ctx.player.id === closestWinner)) {
       closestWinner = nextId(closestWinner)
     }
@@ -323,7 +331,7 @@ export class Mahjong {
     if (!this.multipleRon && ctxs.length > 1) {
       ctxs = [ctxs.find(ctx => ctx.player.id === closestWinner)]
     }
-    const furikomi = this.round.kiru.from.playerId
+    const furikomi = this.round.kiru.playerId
     const horaList: MahjongEnd['hora'] = []
     for (const ctx of ctxs) {
       const oya = ctx.player.isDealer
@@ -426,7 +434,7 @@ export class Mahjong {
       this.end({
         type: 'ryuukyoku',
         ryuukyoku: {
-          type: '荒牌流局',
+          type: 'hoapai',
           tenpai: tenpaiIds,
           mangan,
         },
@@ -520,7 +528,7 @@ export class Mahjong {
     let oya = false
     if (end.type === 'hora') {
       oya = end.hora.some(hora => this.round.players[hora.id].isDealer)
-    } else if (end.type === 'ryuukyoku' && end.ryuukyoku.type === '荒牌流局') {
+    } else if (end.type === 'ryuukyoku' && end.ryuukyoku.type === 'hoapai') {
       oya = end.ryuukyoku.tenpai.some(id => this.round.players[id].isDealer)
     }
     return oya
@@ -530,18 +538,18 @@ export class Mahjong {
   // 或者返回 false 表示整场结束（被飞 / 西入超分 / 南四局结束）
   nextRound(): boolean {
     if (!this.canNextRound()) return false
+    // 这一局的庄家（createRound 会把 round 换掉，先记下来）
+    const dealer = this.round.dealer
     if (this.oyaRepeats()) {
       this.homba++
-      this.createRound()
+      this.createRound(dealer)
     } else if (this.kyoku < 4) {
       this.kyoku++
-      this.dealer = nextId(this.dealer)
-      this.createRound()
+      this.createRound(nextId(dealer))
     } else {
       this.kyoku = 1
-      this.dealer = nextId(this.dealer)
       this.bakaze = shimocha(this.bakaze)
-      this.createRound()
+      this.createRound(nextId(dealer))
     }
     this.next()
     return true
@@ -560,7 +568,7 @@ export class Mahjong {
         this.end({
           type: 'ryuukyoku',
           ryuukyoku: {
-            type: '四杠散了',
+            type: 'suukansanra',
           },
         })
         return false
@@ -569,8 +577,8 @@ export class Mahjong {
     return true
   }
   
-  private createRound() {
+  private createRound(dealer: PlayerId) {
     // 按当前场风与庄家开新的一局，牌山交给 createTiles（不传则用默认打乱的一副）
-    this.round = new Round(this.bakaze, this.dealer, this.createTiles?.(this.dealer, this.kyoku, this.homba))
+    this.round = new Round(this.bakaze, dealer, this.createTiles?.(dealer, this.kyoku, this.homba))
   }
 }
