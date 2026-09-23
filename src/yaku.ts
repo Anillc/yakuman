@@ -1,6 +1,6 @@
-import { Player, Round, Tile, TileType, kazes, sangens } from './round'
-import { Block, Decomposed, chitoitsuShanten, decompose, kokushimusouShanten, minShanten, normalShanten } from './tempai'
-import { Pai, arrayEquals, comparePai, group } from './utils'
+import { Player, Round, Tile, Suit, kazes, sangens } from './round'
+import { Block, Decomposed, chiitoitsuShanten, decompose, kokushiMusouShanten, minShanten, normalShanten } from './tenpai'
+import { TileKind, arrayEquals, compareTileKind, group } from './utils'
 
 export interface Yaku {
   fu: number
@@ -26,7 +26,7 @@ export interface Yaku {
   // 平和 (门前清)
   pinfu?: 1
   // 一杯口 (门前清)
-  iipeko?: 1
+  iipeikou?: 1
   // 抢杠
   chankan?: 1
   // 岭上
@@ -48,32 +48,32 @@ export interface Yaku {
 
   // 两番
   // 双立直 (门前清)
-  doubleriichi?: 2
+  doubleRiichi?: 2
   // 三色同刻
-  sanshokudoko?: 2
+  sanshokuDoukou?: 2
   // 三杠子
   sankantsu?: 2
   // 对对和
   toitoi?: 2
   // 三暗刻
-  sananko?: 2
+  sanankou?: 2
   // 小三元
-  shosangen?: 2
+  shousangen?: 2
   // 混老头
-  honroto?: 2
+  honroutou?: 2
   // 七对子 (门前清)
-  chitoitsu?: 2
+  chiitoitsu?: 2
   // 混全带幺九 (副露减一番)
   chanta?: 1 | 2
   // 一气通贯 (副露减一番)
-  ittsu?: 1 | 2
+  ittsuu?: 1 | 2
   // 三色同顺 (副露减一番)
-  sanshokudojun?: 1 | 2
+  sanshokuDoujun?: 1 | 2
 
 
   // 三番
   // 两杯口 (门前清)
-  ryampeko?: 3
+  ryanpeikou?: 3
   // 纯全带幺九 (副露减一番)
   junchan?: 2 | 3
   // 混一色 (副露减一番)
@@ -87,57 +87,57 @@ export interface Yaku {
 
   // 役满
   // 天和 (庄家限定)
-  tenho?: 13
+  tenhou?: 13
   // 地和 (子家限定)
-  chiho?: 13
+  chiihou?: 13
   // 大三元
   daisangen?: 13
   // 四暗刻 (门前清)
-  suanko?: 13
+  suuankou?: 13
   // 字一色
-  tsuiso?: 13
+  tsuuiisou?: 13
   // 绿一色
-  ryuiso?: 13
+  ryuuiisou?: 13
   // 清老头
-  chinroto?: 13
+  chinroutou?: 13
   // 国士无双 (门前清)
-  kokushimusou?: 13
+  kokushiMusou?: 13
   // 小四喜
-  shosushi?: 13
+  shousuushii?: 13
   // 四杠子
-  sukantsu?: 13
+  suukantsu?: 13
   // 九莲宝灯 (门前清)
-  kyuurempoto?: 13
+  chuurenPoutou?: 13
 
   // 两倍役满
   // 四暗刻单骑 (门前清)
-  suankotanki?: 26
+  suuankouTanki?: 26
   // 国士无双十三面 (门前清)
-  kokushimusou13?: 26
+  kokushiMusou13?: 26
   // 纯正九莲宝灯 (门前清)
-  junseikyuurempoto?: 26
+  junseiChuurenPoutou?: 26
   // 大四喜
-  daisushi?: 26
+  daisuushii?: 26
 }
 
-export const yakuman = ['tenho', 'chiho', 'daisangen', 'suanko', 'tsuiso', 'ryuiso', 'chinroto', 'kokushimusou', 'shosushi', 'sukantsu', 'kyuurempoto']
-export const doubleyakuman = ['suankotanki', 'kokushimusou13', 'junseikyuurempoto', 'daisushi']
+export const yakuman = ['tenhou', 'chiihou', 'daisangen', 'suuankou', 'tsuuiisou', 'ryuuiisou', 'chinroutou', 'kokushiMusou', 'shousuushii', 'suukantsu', 'chuurenPoutou']
+export const doubleyakuman = ['suuankouTanki', 'kokushiMusou13', 'junseiChuurenPoutou', 'daisuushii']
 
-type HoraType = 'chitoitsu' | 'kokushimusou' | 'kokushimusou13' | 'normal'
+type HoraType = 'chiitoitsu' | 'kokushiMusou' | 'kokushiMusou13' | 'normal'
 
-function checkType(player: Player, tiles: Pai[]): HoraType {
+function horaType(player: Player, tiles: TileKind[]): HoraType {
   const counts = group(tiles)
   const [shanten] = minShanten(decompose(counts), player.naki + player.ankan.length)
-  const chitoi = chitoitsuShanten(counts)
-  const kokushi = kokushimusouShanten(counts)
-  if (chitoi[0] === -1) {
-    return 'chitoitsu'
+  const chiitoitsu = chiitoitsuShanten(counts)
+  const kokushiMusou = kokushiMusouShanten(counts)
+  if (chiitoitsu[0] === -1) {
+    return 'chiitoitsu'
   }
-  if (kokushi[0] === -1) {
-    if (kokushi[1].length !== 1) {
-      return 'kokushimusou13'
+  if (kokushiMusou[0] === -1) {
+    if (kokushiMusou[1].length !== 1) {
+      return 'kokushiMusou13'
     } else {
-      return 'kokushimusou'
+      return 'kokushiMusou'
     }
   }
   if (shanten === -1) {
@@ -145,39 +145,39 @@ function checkType(player: Player, tiles: Pai[]): HoraType {
   }
 }
 
-export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, chankan: boolean, optionalPai?: Pai[]) {
+export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: boolean, isChankan: boolean, handOverride?: TileKind[]) {
   const yaku: Yaku = { fu: 20, fan: 0 }
-  const tiles: Pai[] = optionalPai ? [...optionalPai] : [...player.tiles]
-  if (!last) {
-    last = tiles.pop()
+  const handTiles: TileKind[] = handOverride ? [...handOverride] : [...player.tiles]
+  if (!horaTile) {
+    horaTile = handTiles.pop()
   }
-  let type = checkType(player, tiles.concat(last))
+  let handType = horaType(player, handTiles.concat(horaTile))
 
-  if (!tsumo) {
+  if (!isTsumo) {
     yaku.fu += 10
-  } else if (tsumo && player.naki === 0) {
+  } else if (isTsumo && player.naki === 0) {
     // 门前清自摸
     yaku.tsumo = 1
     yaku.fu += 2
-    if (round.chihoKyuushukyuuhaiDoubleRiichiSufurenda) {
+    if (round.firstTurnIntact) {
       if (player.kaze === 'ton') {
-        yaku.tenho = 13
+        yaku.tenhou = 13
       } else {
-        yaku.chiho = 13
+        yaku.chiihou = 13
       }
     }
   }
 
-  const all: Pai[] = [
-    tiles, player.chi, player.pon.map(pon => pon.tiles),
-    player.minkan, player.ankan, last,
+  const allTiles: TileKind[] = [
+    handTiles, player.chi, player.pon.map(pon => pon.tiles),
+    player.minkan, player.ankan, horaTile,
   ].flat(2)
 
   // 立直
   if (player.riichi) {
     if (player.naki !== 0) throw new Error('unreachable')
     if (player.riichi.double) {
-      yaku.doubleriichi = 2
+      yaku.doubleRiichi = 2
     } else {
       yaku.riichi = 1
     }
@@ -189,30 +189,30 @@ export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, ch
 
 
   // 断幺九
-  let tanyao = true
-  for (const tile of all) {
-    if (['man', 'so', 'pin'].includes(tile.type)) {
-      if (tile.num === 1 || tile.num === 9) {
-        tanyao = false
+  let isTanyao = true
+  for (const tile of allTiles) {
+    if (['man', 'so', 'pin'].includes(tile.suit)) {
+      if (tile.rank === 1 || tile.rank === 9) {
+        isTanyao = false
         break
       }
     }
-    if (['kaze', 'sangen'].includes(tile.type)) {
-      tanyao = false
+    if (['kaze', 'sangen'].includes(tile.suit)) {
+      isTanyao = false
       break
     }
   }
-  if (tanyao) {
+  if (isTanyao) {
     yaku.tanyao = 1
   }
 
   // 抢杠
-  if (chankan) {
+  if (isChankan) {
     yaku.chankan = 1
   }
 
   if (round.rest === 0) {
-    if (tsumo) {
+    if (isTsumo) {
       // 河底
       yaku.hotei = 1
     } else {
@@ -223,41 +223,41 @@ export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, ch
 
   // 宝牌
   const dorahyoji = round.dorahyoji
-  const dora: Pai[] = dorahyoji[0].map(({ type, num }) => {
-    if (['man', 'so', 'pin'].includes(type)) {
-      return { type, num: (num + 1) % 9 }
-    } else if (type === 'kaze') {
-      return { type, num: (num + 1) % 4}
+  const dora: TileKind[] = dorahyoji[0].map(({ suit, rank }) => {
+    if (['man', 'so', 'pin'].includes(suit)) {
+      return { suit, rank: (rank + 1) % 9 }
+    } else if (suit === 'kaze') {
+      return { suit, rank: (rank + 1) % 4}
     } else {
-      return { type, num: (num + 1) % 3}
+      return { suit, rank: (rank + 1) % 3}
     }
   })
   yaku.dora = 0
   for (const d of dora) {
-    for (const tile of all) {
-      if (comparePai(tile, d) === 0) yaku.dora++
+    for (const tile of allTiles) {
+      if (compareTileKind(tile, d) === 0) yaku.dora++
     }
   }
   // 里宝牌
   if (player.riichi) {
-    const uradora: Pai[] = dorahyoji[1].map(({ type, num }) => {
-      if (['man', 'so', 'pin'].includes(type)) {
-        return { type, num: (num + 1) % 9 }
-      } else if (type === 'kaze') {
-        return { type, num: (num + 1) % 4}
+    const uradora: TileKind[] = dorahyoji[1].map(({ suit, rank }) => {
+      if (['man', 'so', 'pin'].includes(suit)) {
+        return { suit, rank: (rank + 1) % 9 }
+      } else if (suit === 'kaze') {
+        return { suit, rank: (rank + 1) % 4}
       } else {
-        return { type, num: (num + 1) % 3}
+        return { suit, rank: (rank + 1) % 3}
       }
     })
     yaku.uradora = 0
     for (const d of uradora) {
-      for (const tile of all) {
-        if (comparePai(tile, d) === 0) yaku.dora++
+      for (const tile of allTiles) {
+        if (compareTileKind(tile, d) === 0) yaku.dora++
       }
     }
   }
   // 红宝牌
-  for (const tile of all) {
+  for (const tile of allTiles) {
     if (tile instanceof Tile && tile.red) {
       yaku.reddora ||= 0
       yaku.reddora++
@@ -265,140 +265,140 @@ export function yaku(round: Round, player: Player, last: Pai, tsumo: boolean, ch
   }
 
   // 混老头
-  let honroto = true
+  let isHonroto = true
   // 清老头
-  let chinroto = true
+  let isChinroto = true
   // 至少应该要有数牌
-  let rotoValid = false
-  for (const tile of all) {
-    if (['man', 'so', 'pin'].includes(tile.type)) {
-      rotoValid = true
-      if (tile.num !== 1 && tile.num !== 9) {
-        honroto = false
-        chinroto = false
+  let hasSuitTiles = false
+  for (const tile of allTiles) {
+    if (['man', 'so', 'pin'].includes(tile.suit)) {
+      hasSuitTiles = true
+      if (tile.rank !== 1 && tile.rank !== 9) {
+        isHonroto = false
+        isChinroto = false
         break
       }
     } else {
-      chinroto = false
+      isChinroto = false
     }
   }
-  if (rotoValid) {
-    if (chinroto) {
-      yaku.chinroto = 13
-    } else if (honroto) {
-      yaku.honroto = 2
+  if (hasSuitTiles) {
+    if (isChinroto) {
+      yaku.chinroutou = 13
+    } else if (isHonroto) {
+      yaku.honroutou = 2
     }
   }
 
   // 混一色
-  let honitsu = true
+  let isHonitsu = true
   // 清一色
-  let chinitsu = true
-  let itsuType: TileType
-  for (const tile of all) {
-    if (['man', 'so', 'pin'].includes(tile.type)) {
-      if (!itsuType) {
-        itsuType = tile.type
+  let isChinitsu = true
+  let flushSuit: Suit
+  for (const tile of allTiles) {
+    if (['man', 'so', 'pin'].includes(tile.suit)) {
+      if (!flushSuit) {
+        flushSuit = tile.suit
       } else {
-        if (tile.type !== itsuType) {
-          honitsu = false
-          chinitsu = false
+        if (tile.suit !== flushSuit) {
+          isHonitsu = false
+          isChinitsu = false
           break
         }
       }
     } else {
-      chinitsu = false
+      isChinitsu = false
     }
   }
   // 至少要有数牌
-  if (itsuType) {
+  if (flushSuit) {
     if (player.naki === 0) {
-      if (chinitsu) {
+      if (isChinitsu) {
         yaku.chinitsu = 6
-      } else if (honitsu) {
+      } else if (isHonitsu) {
         yaku.honitsu = 3
       }
     } else {
-      if (chinitsu) {
+      if (isChinitsu) {
         yaku.chinitsu = 5
-      } else if (honitsu) {
+      } else if (isHonitsu) {
         yaku.honitsu = 2
       }
     }
 
     // 九莲宝灯
     // 纯正九莲宝灯
-    if (chinitsu && player.naki === 0) {
-      const counts = group(all)[itsuType]
-      const counts13 = group(tiles)[itsuType]
-      if (counts.every((tile, num) => {
-        if (num === 0 || num === 8) return tile >= 3
-        return num >= 1
+    if (isChinitsu && player.naki === 0) {
+      const counts = group(allTiles)[flushSuit]
+      const counts13 = group(handTiles)[flushSuit]
+      if (counts.every((tile, rank) => {
+        if (rank === 0 || rank === 8) return tile >= 3
+        return rank >= 1
       })) {
-        if (counts13.every((tile, num) => {
-          if (num === 0 || num === 8) return tile === 3
+        if (counts13.every((tile, rank) => {
+          if (rank === 0 || rank === 8) return tile === 3
           return tile === 1
         })) {
-          yaku.junseikyuurempoto = 26
+          yaku.junseiChuurenPoutou = 26
         } else {
-          yaku.kyuurempoto = 13
+          yaku.chuurenPoutou = 13
         }
       }
     }
   }
 
-  const tsuiso = all.every(tile => ['kaze', 'sangen'].includes(tile.type))
-  if (tsuiso) {
-    yaku.tsuiso = 13
+  const isTsuiso = allTiles.every(tile => ['kaze', 'sangen'].includes(tile.suit))
+  if (isTsuiso) {
+    yaku.tsuuiisou = 13
   }
 
-  const ryuiso = all.every(tile => {
-    if (tile.type !== 'so' && tile.type !== 'sangen') return false
-    if (tile.type === 'so' && ![2, 3, 4, 6, 8].includes(tile.num)) return false
-    if (tile.type === 'sangen' && tile.num !== 2) return false
+  const isRyuiso = allTiles.every(tile => {
+    if (tile.suit !== 'so' && tile.suit !== 'sangen') return false
+    if (tile.suit === 'so' && ![2, 3, 4, 6, 8].includes(tile.rank)) return false
+    if (tile.suit === 'sangen' && tile.rank !== 2) return false
     return true
   })
-  if (ryuiso) {
-    yaku.ryuiso = 13
+  if (isRyuiso) {
+    yaku.ryuuiisou = 13
   }
 
   // 与牌型相关的役
-  if (type === 'chitoitsu') {
+  if (handType === 'chiitoitsu') {
     // 七对子
-    yaku.chitoitsu = 2
+    yaku.chiitoitsu = 2
     yaku.fu = 25
   }
-  if (type === 'kokushimusou') {
+  if (handType === 'kokushiMusou') {
     // 国士无双
-    yaku.kokushimusou = 13
+    yaku.kokushiMusou = 13
     yaku.fu = 25
   }
-  if (type === 'kokushimusou13') {
+  if (handType === 'kokushiMusou13') {
     // 国士无双十三面
-    yaku.kokushimusou13 = 26
+    yaku.kokushiMusou13 = 26
     yaku.fu = 25
   }
-  if (type === 'normal') {
-    const [, decomposed] = normalShanten(group(tiles), player.naki + player.ankan.length)
+  if (handType === 'normal') {
+    const [, waitDecompositions] = normalShanten(group(handTiles), player.naki + player.ankan.length)
 
     const yakus: Yaku[] = []
-    for (const [pai, decs] of decomposed) {
-      if (comparePai(last, pai) !== 0) continue
+    for (const [wait, decs] of waitDecompositions) {
+      if (compareTileKind(horaTile, wait) !== 0) continue
       for (const dec of decs) {
-        const y = { ...yaku }
-        yakus.push(y)
-        normalYaku(round, player, yaku, dec, last, tsumo)
+        const candidate = { ...yaku }
+        yakus.push(candidate)
+        normalYaku(round, player, yaku, dec, horaTile, isTsumo)
       }
     }
-    return yakus.map(yaku => final(yaku)).reduce((acc, x) => x[1] > acc[1] ? x : acc, [null, -Infinity])
+    return yakus.map(yaku => finalize(yaku)).reduce((acc, x) => x[1] > acc[1] ? x : acc, [null, -Infinity])
   } else {
-    return final(yaku, type === 'chitoitsu')
+    return finalize(yaku, handType === 'chiitoitsu')
   }
 }
 
 function normalYaku(
-  round: Round, player: Player, yaku: Yaku,
-  decomposed: Decomposed, last: Pai, tsumo: boolean,
+  round: Round, player: Player, result: Yaku,
+  decomposition: Decomposed, horaTile: TileKind, isTsumo: boolean,
 ) {
   const mentsu: Block[] = []
   const toitsu: Block[] = []
@@ -409,20 +409,20 @@ function normalYaku(
   let penchan = false
   let kanchan = false
 
-  for (const block of decomposed.blocks) {
+  for (const block of decomposition.blocks) {
     if (block.type === 'shuntsu') {
       mentsu.push(block)
     }
     if (block.type === 'kotsu') {
       mentsu.push(block)
-      if (['man', 'so', 'pin'].includes(block.tileType)) {
+      if (['man', 'so', 'pin'].includes(block.suit)) {
         if ([1, 9].includes(block.tiles[0])) {
-          yaku.fu += 8
+          result.fu += 8
         } else {
-          yaku.fu += 4
+          result.fu += 4
         }
       } else {
-        yaku.fu += 8
+        result.fu += 8
       }
       anko++
     }
@@ -433,50 +433,50 @@ function normalYaku(
       kanchan = true
       mentsu.push({
         type: 'shuntsu',
-        tileType: block.tileType,
-        tiles: [block.tiles[0], last.num, block.tiles[1]],
+        suit: block.suit,
+        tiles: [block.tiles[0], horaTile.rank, block.tiles[1]],
       })
     }
     if (block.type === 'penchan') {
       penchan = true
       mentsu.push({
         type: 'shuntsu',
-        tileType: block.tileType,
-        tiles: block.tiles[0] - 1 === last.num
-          ? [last.num, ...block.tiles]
-          : [...block.tiles, last.num],
+        suit: block.suit,
+        tiles: block.tiles[0] - 1 === horaTile.rank
+          ? [horaTile.rank, ...block.tiles]
+          : [...block.tiles, horaTile.rank],
       })
     }
     if (block.type === 'ryammen') {
       ryammen = true
       mentsu.push({
         type: 'shuntsu',
-        tileType: block.tileType,
-        tiles: block.tiles[0] - 1 === last.num
-          ? [last.num, ...block.tiles]
-          : [...block.tiles, last.num],
+        suit: block.suit,
+        tiles: block.tiles[0] - 1 === horaTile.rank
+          ? [horaTile.rank, ...block.tiles]
+          : [...block.tiles, horaTile.rank],
       })
     }
   }
 
   if (mentsu.length === 3 && toitsu.length === 2) {
-    const kotsuIndex = toitsu.findIndex(toitsu => comparePai(last, { type: toitsu.tileType, num: toitsu.tiles[0] }) === 0)
+    const kotsuIndex = toitsu.findIndex(toitsu => compareTileKind(horaTile, { suit: toitsu.suit, rank: toitsu.tiles[0] }) === 0)
     if (kotsuIndex === -1) throw new Error('unreachable')
     const kotsu = toitsu.splice(kotsuIndex, 1)[0]
     mentsu.push({
       type: 'kotsu',
-      tileType: kotsu.tileType,
-      tiles: kotsu.tiles.concat(last.num)
+      suit: kotsu.suit,
+      tiles: kotsu.tiles.concat(horaTile.rank)
     })
-    if (tsumo) {
-      if (['man', 'so', 'pin'].includes(kotsu.tileType)) {
+    if (isTsumo) {
+      if (['man', 'so', 'pin'].includes(kotsu.suit)) {
         if ([1, 9].includes(kotsu.tiles[0])) {
-          yaku.fu += 8
+          result.fu += 8
         } else {
-          yaku.fu += 4
+          result.fu += 4
         }
       } else {
-        yaku.fu += 8
+        result.fu += 8
       }
       anko++
     }
@@ -484,68 +484,68 @@ function normalYaku(
     tanki = true
     toitsu.push({
       type: 'toitsu',
-      tileType: last.type,
-      tiles: [last.num, last.num],
+      suit: horaTile.suit,
+      tiles: [horaTile.rank, horaTile.rank],
     })
   }
 
   if (tanki || penchan || kanchan) {
-    yaku.fu += 2
+    result.fu += 2
   }
 
   for (const chi of player.chi) {
     mentsu.push({
       type: 'shuntsu',
-      tileType: chi[0].type,
-      tiles: chi.map(tile => tile.num),
+      suit: chi[0].suit,
+      tiles: chi.map(tile => tile.rank),
     })
   }
   for (const pon of player.pon) {
     mentsu.push({
       type: 'kotsu',
-      tileType: pon.tiles[0].type,
-      tiles: pon.tiles.map(tile => tile.num),
+      suit: pon.tiles[0].suit,
+      tiles: pon.tiles.map(tile => tile.rank),
     })
-    if (['man', 'so', 'pin'].includes(pon.tiles[0].type)) {
-      if ([1, 9].includes(pon.tiles[0].num)) {
-        yaku.fu += pon.chakan ? 16 : 4
+    if (['man', 'so', 'pin'].includes(pon.tiles[0].suit)) {
+      if ([1, 9].includes(pon.tiles[0].rank)) {
+        result.fu += pon.chakan ? 16 : 4
       } else {
-        yaku.fu += pon.chakan ? 8 : 2
+        result.fu += pon.chakan ? 8 : 2
       }
     } else {
-      yaku.fu += pon.chakan ? 16 : 4
+      result.fu += pon.chakan ? 16 : 4
     }
   }
   for (const kan of player.minkan) {
     mentsu.push({
       type: 'kotsu',
-      tileType: kan[0].type,
-      tiles: kan.map(tile => tile.num),
+      suit: kan[0].suit,
+      tiles: kan.map(tile => tile.rank),
     })
-    if (['man', 'so', 'pin'].includes(kan[0].type)) {
-      if ([1, 9].includes(kan[0].num)) {
-        yaku.fu += 16
+    if (['man', 'so', 'pin'].includes(kan[0].suit)) {
+      if ([1, 9].includes(kan[0].rank)) {
+        result.fu += 16
       } else {
-        yaku.fu += 8
+        result.fu += 8
       }
     } else {
-      yaku.fu += 16
+      result.fu += 16
     }
   }
   for (const kan of player.ankan) {
     mentsu.push({
       type: 'kotsu',
-      tileType: kan[0].type,
-      tiles: kan.map(tile => tile.num),
+      suit: kan[0].suit,
+      tiles: kan.map(tile => tile.rank),
     })
-    if (['man', 'so', 'pin'].includes(kan[0].type)) {
-      if ([1, 9].includes(kan[0].num)) {
-        yaku.fu += 32
+    if (['man', 'so', 'pin'].includes(kan[0].suit)) {
+      if ([1, 9].includes(kan[0].rank)) {
+        result.fu += 32
       } else {
-        yaku.fu += 16
+        result.fu += 16
       }
     } else {
-      yaku.fu += 32
+      result.fu += 32
     }
   }
 
@@ -554,84 +554,84 @@ function normalYaku(
 
   for (const block of kotsu) {
     // 场风
-    if (block.tileType === 'kaze' && kazes[block.tiles[0] - 1] === round.bakaze) {
-      yaku.bakaze = 1
+    if (block.suit === 'kaze' && kazes[block.tiles[0] - 1] === round.bakaze) {
+      result.bakaze = 1
     }
     // 自风
-    if (block.tileType === 'kaze' && kazes[block.tiles[0] - 1] === player.kaze) {
-      yaku.jikaze = 1
+    if (block.suit === 'kaze' && kazes[block.tiles[0] - 1] === player.kaze) {
+      result.jikaze = 1
     }
     // 白发中
-    if (block.tileType === 'sangen') {
-      yaku[sangens[block.tiles[0] - 1]] = 1
+    if (block.suit === 'sangen') {
+      result[sangens[block.tiles[0] - 1]] = 1
     }
   }
 
   // 平和
-  let yakuhaiToitsu = false
-  if (toitsu[0].tileType === 'sangen') {
-    yakuhaiToitsu = true
-    yaku.fu += 2
-  } else if (toitsu[0].tileType === 'kaze') {
+  let yakuhaiPair = false
+  if (toitsu[0].suit === 'sangen') {
+    yakuhaiPair = true
+    result.fu += 2
+  } else if (toitsu[0].suit === 'kaze') {
     const kaze = kazes[toitsu[0].tiles[0] - 1]
     if (kaze === round.bakaze) {
-      yakuhaiToitsu = true
-      yaku.fu += 2
+      yakuhaiPair = true
+      result.fu += 2
     }
     if (kaze === player.kaze) {
-      yakuhaiToitsu = true
-      yaku.fu += 2
+      yakuhaiPair = true
+      result.fu += 2
     }
   }
-  if (kotsu.length === 0 && !yakuhaiToitsu && ryammen) {
+  if (kotsu.length === 0 && !yakuhaiPair && ryammen) {
     if (player.naki === 0) {
-      yaku.pinfu = 1
-      if (tsumo) {
+      result.pinfu = 1
+      if (isTsumo) {
         // 平和自摸不算自摸的两符
-        yaku.fu -= 2
+        result.fu -= 2
       }
     } else {
       // 副露平和底符为 30
-      yaku.fu += 10
+      result.fu += 10
     }
   }
 
   // 一杯口/两杯口
   if (player.naki === 0) {
     let count = 0
-    const shuntsu1 = [...shuntsu]
+    const restShuntsu = [...shuntsu]
     let block: Block
-    while (block = shuntsu1.shift()) {
-      const index = shuntsu1.findIndex(shuntsu =>
-        shuntsu.tileType === block.tileType && arrayEquals(shuntsu.tiles, block.tiles))
+    while (block = restShuntsu.shift()) {
+      const index = restShuntsu.findIndex(shuntsu =>
+        shuntsu.suit === block.suit && arrayEquals(shuntsu.tiles, block.tiles))
       if (index !== -1) {
-        shuntsu1.splice(index, 1)
+        restShuntsu.splice(index, 1)
         count++
       }
     }
     if (count === 1) {
-      yaku.iipeko = 1
+      result.iipeikou = 1
     } else if (count === 2) {
-      yaku.ryampeko = 3
+      result.ryanpeikou = 3
     }
   }
 
   // 三色同刻
-  const kotsu1 = [...kotsu]
-  if (kotsu1.length >= 3) {
+  const restKotsu = [...kotsu]
+  if (restKotsu.length >= 3) {
     let block: Block
-    while (block = kotsu1.shift()) {
+    while (block = restKotsu.shift()) {
       let same = 1
-      for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
-        if (block.tileType === type) continue
-        const index = kotsu1.findIndex(kotsu => arrayEquals(block.tiles, kotsu.tiles))
+      for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
+        if (block.suit === suit) continue
+        const index = restKotsu.findIndex(kotsu => arrayEquals(block.tiles, kotsu.tiles))
         if (index !== -1) {
-          kotsu1.splice(index, 1)
+          restKotsu.splice(index, 1)
           same++
         }
       }
       if (same === 3) {
-        yaku.sanshokudoko = 2
+        result.sanshokuDoukou = 2
         break
       }
     }
@@ -639,57 +639,57 @@ function normalYaku(
 
   // 三杠子
   if (player.minkan.length + player.ankan.length === 3) {
-    yaku.sankantsu = 2
+    result.sankantsu = 2
   }
   
   // 四杠子
   if (player.minkan.length + player.ankan.length === 4) {
-    yaku.sukantsu = 13
+    result.suukantsu = 13
   }
 
   // 对对和
   if (kotsu.length === 4) {
-    yaku.toitoi = 2
+    result.toitoi = 2
   }
 
   // 三暗刻
   if (anko === 3) {
-    yaku.sananko = 2
+    result.sanankou = 2
   }
 
   if (anko === 4) {
     if (tanki) {
       // 四暗刻单骑
-      yaku.suankotanki = 26
+      result.suuankouTanki = 26
     } else {
       // 四暗刻
-      yaku.suanko = 13
+      result.suuankou = 13
     }
   }
 
-  const sangenMentsu = mentsu.filter(mentsu => mentsu.tileType === 'sangen')
-  const sangenToitsu = mentsu.filter(mentsu => mentsu.tileType === 'sangen')
+  const sangenMentsu = mentsu.filter(mentsu => mentsu.suit === 'sangen')
+  const sangenToitsu = mentsu.filter(mentsu => mentsu.suit === 'sangen')
 
   // 小三元
   if (sangenMentsu.length === 2 && sangenToitsu.length === 1) {
-    yaku.shosangen = 2
+    result.shousangen = 2
   }
 
   // 大三元
   if (sangenMentsu.length === 3) {
-    yaku.daisangen = 13
+    result.daisangen = 13
   }
 
-  if (!(yaku.honroto || yaku.chinroto)) {
+  if (!(result.honroutou || result.chinroutou)) {
     // 混全带幺九
     let chanta = true
     // 纯全带幺九
     let junchan = true
     // 至少要有数牌
-    let valid = false
+    let hasSuitMentsu = false
     for (const mt of mentsu) {
-      if (['man', 'so', 'pin'].includes(mt.tileType)) {
-        valid = true
+      if (['man', 'so', 'pin'].includes(mt.suit)) {
+        hasSuitMentsu = true
         if (!(mt.tiles.includes(1) || mt.tiles.includes(9))) {
           chanta = false
           junchan = false
@@ -699,106 +699,106 @@ function normalYaku(
         junchan = false
       }
     }
-    if (valid) {
+    if (hasSuitMentsu) {
       if (player.naki === 0) {
         if (junchan) {
-          yaku.junchan = 3
+          result.junchan = 3
         } else if (chanta) {
-          yaku.chanta = 2
+          result.chanta = 2
         }
       } else {
         if (junchan) {
-          yaku.junchan = 2
+          result.junchan = 2
         } else if (chanta) {
-          yaku.chanta = 1
+          result.chanta = 1
         }
       }
     }
   }
 
   // 一气通贯
-  for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
-    const st = shuntsu.filter(shuntsu => shuntsu.tileType === type)
-    const a = st.find(shuntsu => shuntsu.tiles[0] === 1)
-    const b = st.find(shuntsu => shuntsu.tiles[0] === 4)
-    const c = st.find(shuntsu => shuntsu.tiles[0] === 7)
-    if (a && b && c) {
+  for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
+    const suitShuntsu = shuntsu.filter(shuntsu => shuntsu.suit === suit)
+    const low = suitShuntsu.find(shuntsu => shuntsu.tiles[0] === 1)
+    const mid = suitShuntsu.find(shuntsu => shuntsu.tiles[0] === 4)
+    const high = suitShuntsu.find(shuntsu => shuntsu.tiles[0] === 7)
+    if (low && mid && high) {
       if (player.naki === 0) {
-        yaku.ittsu = 2
+        result.ittsuu = 2
       } else {
-        yaku.ittsu = 1
+        result.ittsuu = 1
       }
       break
     }
   }
 
   // 三色同顺
-  const shuntsu1 = [...shuntsu]
-  if (shuntsu1.length >= 3) {
+  const restShuntsu = [...shuntsu]
+  if (restShuntsu.length >= 3) {
     let block: Block
-    while (block = shuntsu1.shift()) {
+    while (block = restShuntsu.shift()) {
       let same = 1
-      for (const type of ['man', 'so', 'pin'] satisfies TileType[]) {
-        if (block.tileType === type) continue
-        const index = shuntsu1.findIndex(shuntsu => arrayEquals(block.tiles, shuntsu.tiles))
+      for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
+        if (block.suit === suit) continue
+        const index = restShuntsu.findIndex(shuntsu => arrayEquals(block.tiles, shuntsu.tiles))
         if (index !== -1) {
-          shuntsu1.splice(index, 1)
+          restShuntsu.splice(index, 1)
           same++
         }
       }
       if (same === 3) {
         if (player.naki === 0) {
-          yaku.sanshokudojun = 2
+          result.sanshokuDoujun = 2
         } else {
-          yaku.sanshokudojun = 1
+          result.sanshokuDoujun = 1
         }
         break
       }
     }
   }
 
-  const kazeKotsu = kotsu.filter(kotsu => kotsu.tileType === 'kaze')
-  const kazeToitsu = toitsu[0].tileType === 'kaze'
+  const kazeKotsu = kotsu.filter(kotsu => kotsu.suit === 'kaze')
+  const kazeToitsu = toitsu[0].suit === 'kaze'
 
   // 小四喜
   if (kazeKotsu.length === 3 && kazeToitsu) {
-    yaku.shosushi = 13
+    result.shousuushii = 13
   }
 
   // 大四喜
   if (kazeKotsu.length === 4) {
-    yaku.daisushi = 26
+    result.daisuushii = 26
   }
 }
 
-function final(yaku: Yaku, chitoitsu?: boolean): [Yaku, number] {
-  const fu = chitoitsu ? yaku.fu : Math.ceil(yaku.fu / 10) * 10
+function finalize(result: Yaku, isChiitoitsu?: boolean): [Yaku, number] {
+  const fu = isChiitoitsu ? result.fu : Math.ceil(result.fu / 10) * 10
   const newYaku: Yaku = { fu, fan: 0 }
   for (const ykm of yakuman) {
-    if (ykm in yaku) {
+    if (ykm in result) {
       newYaku[ykm] = 13
       newYaku.fan += 13
     }
   }
   for (const ykm of doubleyakuman) {
-    if (ykm in yaku) {
+    if (ykm in result) {
       newYaku[ykm] = 26
       newYaku.fan += 26
     }
   }
-  if (newYaku.fan >= 13) return [newYaku, a(newYaku.fan, fu)]
-  for (const [name, fan] of Object.entries(yaku)) {
+  if (newYaku.fan >= 13) return [newYaku, basicPoints(newYaku.fan, fu)]
+  for (const [name, fan] of Object.entries(result)) {
     if (['fu', 'fan'].includes(name)) continue
     newYaku[name] = fan
     newYaku.fan += fan
   }
-  return [newYaku, a(newYaku.fan, fu)]
+  return [newYaku, basicPoints(newYaku.fan, fu)]
 }
 
-function a(fan: number, fu: number) {
+function basicPoints(fan: number, fu: number) {
   if (fan <= 4) {
-    const a = fu * (2 ** (fan + 2))
-    return a >= 2000 ? 2000 : a
+    const points = fu * (2 ** (fan + 2))
+    return points >= 2000 ? 2000 : points
   }
   switch (fan) {
     case 5:
@@ -818,9 +818,9 @@ function a(fan: number, fu: number) {
   }
 }
 
-export function canHora(yaku: Yaku) {
-  const dora = yaku.dora || 0
-  const reddora = yaku.reddora || 0
-  const uradora = yaku.uradora || 0
-  return yaku.fan - dora - reddora - uradora > 0
+export function canHora(result: Yaku) {
+  const dora = result.dora || 0
+  const reddora = result.reddora || 0
+  const uradora = result.uradora || 0
+  return result.fan - dora - reddora - uradora > 0
 }

@@ -1,14 +1,14 @@
-import { Kaze, Tile, TileType, tileTypes } from './round'
-import { Block, Decomposed, NumberDecomposed, blockTypes } from './tempai'
+import { Kaze, Tile, Suit, suits } from './round'
+import { Block, Decomposed, NumberDecomposed, blockTypes } from './tenpai'
 import uniqWith from 'lodash.uniqwith'
 
-export interface Pai {
-  type: TileType
-  num: number
+export interface TileKind {
+  suit: Suit
+  rank: number
 }
 
 export type Counts = {
-  [key in TileType]: number[]
+  [key in Suit]: number[]
 }
 
 export function createEmptyCounts(): Counts {
@@ -25,9 +25,9 @@ export function cloneCounts(count: Counts) {
   return structuredClone(count)
 }
 
-export function group(tiles: Pai[]) {
+export function group(tiles: TileKind[]) {
   return tiles.reduce((acc, x) => {
-    acc[x.type][x.num - 1]++
+    acc[x.suit][x.rank - 1]++
     return acc
   }, createEmptyCounts())
 }
@@ -42,10 +42,6 @@ export function addCounts(a: Counts, b: Counts) {
   return c
 }
 
-export function mapRecord<V, T>(record: Record<string, V>, fn: (key: string, value: V) => T) {
-  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, fn(key, value)]))
-}
-
 export function cartesian<T>(...array: T[][]) {
   return array.reduce((acc, x) => {
     return acc.flatMap(a => x.map(b => [...a, b]))
@@ -54,7 +50,7 @@ export function cartesian<T>(...array: T[][]) {
 
 function compareBlock(a: Block, b: Block) {
   if (a.type !== b.type) return a.type > b.type ? 1 : -1
-  if (a.tileType !== b.tileType) return a.tileType > b.tileType ? 1 : -1
+  if (a.suit !== b.suit) return a.suit > b.suit ? 1 : -1
   if (a.tiles.length !== b.tiles.length) return a.tiles.length > b.tiles.length ? 1 : -1
   for (let i = 0; i < a.tiles.length; i++) {
     if (a.tiles[i] !== b.tiles[i]) return a.tiles[i] > b.tiles[i] ? 1 : -1
@@ -73,28 +69,28 @@ export function sortBlocks(blocks: Block[]) {
   return blocks.sort(compareBlock)
 }
 
-export function comparePai(a: Pai, b: Pai) {
-  if (a.type !== b.type) return a.type > b.type ? 1 : -1
-  if (a.num !== b.num) return a.num > b.num ? 1 : -1
+export function compareTileKind(a: TileKind, b: TileKind) {
+  if (a.suit !== b.suit) return a.suit > b.suit ? 1 : -1
+  if (a.rank !== b.rank) return a.rank > b.rank ? 1 : -1
   return 0
 }
 
-export function sortPai(pai: Pai[]) {
-  return pai.sort(comparePai)
+export function sortTileKinds(tileKinds: TileKind[]) {
+  return tileKinds.sort(compareTileKind)
 }
 
-export function uniqPai(pai: Pai[]) {
-  return uniqWith(pai, (a, b) => {
-    return comparePai(a, b) === 0
+export function uniqTileKinds(tileKinds: TileKind[]) {
+  return uniqWith(tileKinds, (a, b) => {
+    return compareTileKind(a, b) === 0
   })
 }
 
-export function toPai(tile: Tile): Pai {
-  return { type: tile.type, num: tile.num }
+export function toTileKind(tile: Tile): TileKind {
+  return { suit: tile.suit, rank: tile.rank }
 }
 
-export function toPaiArray(tiles: Tile[]) {
-  return tiles.map(toPai)
+export function toTileKinds(tiles: Tile[]) {
+  return tiles.map(toTileKind)
 }
 
 export function random(min: number, max: number) {
@@ -131,27 +127,27 @@ export function arrayEquals<T>(a: T[], b: T[]) {
   return true
 }
 
-export function toMPSZ(pai: Pai[]) {
+export function toMPSZ(pai: TileKind[]) {
   pai = [...pai]
-  sortPai(pai)
+  sortTileKinds(pai)
   const grouped = pai.reduce((acc, x) => {
-    acc[x.type].push(x)
+    acc[x.suit].push(x)
     return acc
   }, {
     man: [], so: [], pin: [],
     kaze: [], sangen:[],
-  } as Record<TileType, Pai[]>)
-  function red(tile: Pai) {
+  } as Record<Suit, TileKind[]>)
+  function red(tile: TileKind) {
     if (tile instanceof Tile) {
       return tile.red
     }
     return false
   }
-  const man = grouped.man.map(pai => red(pai) ? 0 : pai.num).join('')
-  const so = grouped.so.map(pai => red(pai) ? 0 : pai.num).join('')
-  const pin = grouped.pin.map(pai => red(pai) ? 0 : pai.num).join('')
-  const kaze = grouped.kaze.map(pai => pai.num).join('')
-  const sangen = grouped.sangen.map(pai => pai.num + 4).join('')
+  const man = grouped.man.map(pai => red(pai) ? 0 : pai.rank).join('')
+  const so = grouped.so.map(pai => red(pai) ? 0 : pai.rank).join('')
+  const pin = grouped.pin.map(pai => red(pai) ? 0 : pai.rank).join('')
+  const kaze = grouped.kaze.map(pai => pai.rank).join('')
+  const sangen = grouped.sangen.map(pai => pai.rank + 4).join('')
   let result = ''
   if (man !== '') result += man + 'm'
   if (so !== '') result += so + 's'
@@ -164,9 +160,9 @@ export function toMPSZ(pai: Pai[]) {
 export function countsHash(counts: Counts) {
   let x = 0
   let hash = 0
-  for (const type of ['man', 'so', 'pin', 'kaze', 'sangen'] satisfies TileType[]) {
-    for (let i = 0; i < counts[type].length; i++) {
-      hash += counts[type][i] << x * 4
+  for (const suit of ['man', 'so', 'pin', 'kaze', 'sangen'] satisfies Suit[]) {
+    for (let i = 0; i < counts[suit].length; i++) {
+      hash += counts[suit][i] << x * 4
       x++
     }
   }
@@ -174,10 +170,10 @@ export function countsHash(counts: Counts) {
 }
 
 export function blockHash(block: Block) {
-  const type = blockTypes.indexOf(block.type)
-  const tileType = tileTypes.indexOf(block.tileType) << 3
+  const suit = blockTypes.indexOf(block.type)
+  const tileType = suits.indexOf(block.suit) << 3
   const tiles = block.tiles.reduce((acc, tile) => acc + tile, 0) << 6
-  return type + tileType + tiles
+  return suit + tileType + tiles
 }
 
 export class DecomposedSet {
