@@ -43,9 +43,10 @@ export function addCounts(a: Counts, b: Counts) {
 }
 
 export function cartesian<T>(...array: T[][]) {
-  return array.reduce((acc, x) => {
+  const [first, ...rest] = array
+  return rest.reduce((acc, x) => {
     return acc.flatMap(a => x.map(b => [...a, b]))
-  }, array.shift().map(x => [x]))
+  }, first.map(x => [x]))
 }
 
 function compareBlock(a: Block, b: Block) {
@@ -94,7 +95,7 @@ export function toTileKinds(tiles: Tile[]) {
 }
 
 export function random(min: number, max: number) {
-  return Math.round(Math.random() * (max - min) + min)
+  return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
 export function shuffle(tiles: Tile[]) {
@@ -158,12 +159,11 @@ export function toMPSZ(pai: TileKind[]) {
 }
 
 export function countsHash(counts: Counts) {
-  let x = 0
   let hash = 0
   for (const suit of ['man', 'so', 'pin', 'kaze', 'sangen'] satisfies Suit[]) {
     for (let i = 0; i < counts[suit].length; i++) {
-      hash += counts[suit][i] << x * 4
-      x++
+      // 每张牌最多 4 张，按 5 进制滚动（原来的移位在 x >= 8 时会按模 32 回绕）
+      hash = (hash * 5 + counts[suit][i]) | 0
     }
   }
   return hash

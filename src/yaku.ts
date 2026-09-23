@@ -153,14 +153,16 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
   }
   let handType = horaType(player, handTiles.concat(horaTile))
 
-  if (!isTsumo) {
+  // 门清荣和才有 10 符加成
+  if (!isTsumo && player.naki === 0) {
     yaku.fu += 10
   } else if (isTsumo && player.naki === 0) {
     // 门前清自摸
     yaku.tsumo = 1
     yaku.fu += 2
     if (round.firstTurnIntact) {
-      if (player.kaze === 'ton') {
+      // 天和：庄家第一巡自摸；其余为地和
+      if (player.kaze === round.dealer) {
         yaku.tenhou = 13
       } else {
         yaku.chiihou = 13
@@ -211,13 +213,21 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
     yaku.chankan = 1
   }
 
+  // 岭上开花（杠后补牌自摸）
+  if (isTsumo && round.rinshan) {
+    yaku.rinshan = 1
+  }
+
   if (round.rest === 0) {
     if (isTsumo) {
+      // 海底
+      // 岭上补的不是牌山最后一张，所以不叠加海底
+      if (!round.rinshan) {
+        yaku.haitei = 1
+      }
+    } else {
       // 河底
       yaku.hotei = 1
-    } else {
-      // 海底
-      yaku.haitei = 1
     }
   }
 
@@ -227,9 +237,9 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
     if (['man', 'so', 'pin'].includes(suit)) {
       return { suit, rank: (rank + 1) % 9 }
     } else if (suit === 'kaze') {
-      return { suit, rank: (rank + 1) % 4}
+      return { suit, rank: rank % 4 + 1 }
     } else {
-      return { suit, rank: (rank + 1) % 3}
+      return { suit, rank: rank % 3 + 1 }
     }
   })
   yaku.dora = 0
@@ -244,15 +254,15 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
       if (['man', 'so', 'pin'].includes(suit)) {
         return { suit, rank: (rank + 1) % 9 }
       } else if (suit === 'kaze') {
-        return { suit, rank: (rank + 1) % 4}
+        return { suit, rank: rank % 4 + 1 }
       } else {
-        return { suit, rank: (rank + 1) % 3}
+        return { suit, rank: rank % 3 + 1 }
       }
     })
     yaku.uradora = 0
     for (const d of uradora) {
       for (const tile of allTiles) {
-        if (compareTileKind(tile, d) === 0) yaku.dora++
+        if (compareTileKind(tile, d) === 0) yaku.uradora++
       }
     }
   }
@@ -387,7 +397,7 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
       for (const dec of decs) {
         const candidate = { ...yaku }
         yakus.push(candidate)
-        normalYaku(round, player, yaku, dec, horaTile, isTsumo)
+        normalYaku(round, player, candidate, dec, horaTile, isTsumo)
       }
     }
     return yakus.map(yaku => finalize(yaku)).reduce((acc, x) => x[1] > acc[1] ? x : acc, [null, -Infinity])
@@ -403,6 +413,11 @@ function normalYaku(
   const mentsu: Block[] = []
   const toitsu: Block[] = []
 
+  // 分解里本来就有的面子数（不含用和牌张补出来的那个）
+  let closedMentsu = 0
+  // 副露（含暗杠）的面子数：算总面子数时要加回来
+  const meldedCount = player.chi.length + player.pon.length + player.minkan.length + player.ankan.length
+
   let anko = 0
   let tanki = false
   let ryammen = false
@@ -412,9 +427,11 @@ function normalYaku(
   for (const block of decomposition.blocks) {
     if (block.type === 'shuntsu') {
       mentsu.push(block)
+      closedMentsu++
     }
     if (block.type === 'kotsu') {
       mentsu.push(block)
+      closedMentsu++
       if (['man', 'so', 'pin'].includes(block.suit)) {
         if ([1, 9].includes(block.tiles[0])) {
           result.fu += 8
@@ -459,7 +476,8 @@ function normalYaku(
     }
   }
 
-  if (mentsu.length === 3 && toitsu.length === 2) {
+  // 双碰：分解里有 2 个对子，和牌张把其中一个补成刻子
+  if (closedMentsu + meldedCount === 3 && toitsu.length === 2) {
     const kotsuIndex = toitsu.findIndex(toitsu => compareTileKind(horaTile, { suit: toitsu.suit, rank: toitsu.tiles[0] }) === 0)
     if (kotsuIndex === -1) throw new Error('unreachable')
     const kotsu = toitsu.splice(kotsuIndex, 1)[0]
@@ -479,8 +497,16 @@ function normalYaku(
         result.fu += 8
       }
       anko++
+    } else {
+      // 荣和补成的刻子算明刻：中张 2 符、幺九/字牌 4 符
+      if (['man', 'so', 'pin'].includes(kotsu.suit)) {
+        result.fu += [1, 9].includes(kotsu.tiles[0]) ? 4 : 2
+      } else {
+        result.fu += 4
+      }
     }
-  } else if (mentsu.length === 4) {
+  } else if (closedMentsu + meldedCount === 4) {
+    // 单骑：分解里的面子已经够 4 个，和牌张补的是雀头
     tanki = true
     toitsu.push({
       type: 'toitsu',
@@ -558,7 +584,8 @@ function normalYaku(
       result.bakaze = 1
     }
     // 自风
-    if (block.suit === 'kaze' && kazes[block.tiles[0] - 1] === player.kaze) {
+    // 自风（庄家为东，随庄家轮转）
+    if (block.suit === 'kaze' && kazes[block.tiles[0] - 1] === round.seatWind(player.kaze)) {
       result.jikaze = 1
     }
     // 白发中
@@ -578,7 +605,7 @@ function normalYaku(
       yakuhaiPair = true
       result.fu += 2
     }
-    if (kaze === player.kaze) {
+    if (kaze === round.seatWind(player.kaze)) {
       yakuhaiPair = true
       result.fu += 2
     }
@@ -668,7 +695,7 @@ function normalYaku(
   }
 
   const sangenMentsu = mentsu.filter(mentsu => mentsu.suit === 'sangen')
-  const sangenToitsu = mentsu.filter(mentsu => mentsu.suit === 'sangen')
+  const sangenToitsu = toitsu.filter(toitsu => toitsu.suit === 'sangen')
 
   // 小三元
   if (sangenMentsu.length === 2 && sangenToitsu.length === 1) {
@@ -772,7 +799,9 @@ function normalYaku(
 }
 
 function finalize(result: Yaku, isChiitoitsu?: boolean): [Yaku, number] {
-  const fu = isChiitoitsu ? result.fu : Math.ceil(result.fu / 10) * 10
+  // 七对子与国士无双按约定的固定 25 符，其余按 10 符进位
+  const fixedFu = isChiitoitsu || !!result.kokushiMusou || !!result.kokushiMusou13
+  const fu = fixedFu ? result.fu : Math.ceil(result.fu / 10) * 10
   const newYaku: Yaku = { fu, fan: 0 }
   for (const ykm of yakuman) {
     if (ykm in result) {
@@ -814,7 +843,8 @@ function basicPoints(fan: number, fu: number) {
     case 12:
       return 6000
     default:
-      return 8000
+      // 13 番以上就是役满，双倍役满（26 番）要翻倍
+      return Math.floor(fan / 13) * 8000
   }
 }
 
