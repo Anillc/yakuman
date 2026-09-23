@@ -16,14 +16,14 @@ export * from './yaku'
 //
 //   for await (const step of mahjong.steps()) {
 //     if (step.type === 'roundEnd') { ...看结果...; continue }   // 再取下一个 step = 打下一局
-//     for (const ctx of step.ctxs) {
-//       if (step.apply(ctx, await ask(ctx))) break               // 这一圈定了就不用问剩下的
+//     for (const slot of step.slots) {
+//       if (step.apply(slot.ctx, await ask(slot))) break         // 这一圈定了就不用问剩下的
 //     }
 //   }
 //
 // 库本身是同步状态机，不 await 任何东西 —— 所以两步之间想等多久都行（等网络、等弹窗、等人工输入），
 // 想只打一局就别再取下一个 step。动作必须来自 ctx.types、候选必须来自 ctx 给出的候选列表，
-// 而且要按 ctxs 的顺序回答：误用一律抛 MahjongError（code 一览见 utils.ts）。
+// 而且要按 slots 的顺序回答：误用一律抛 MahjongError（code 一览见 utils.ts）。
 
 // 某一家当前可以做的操作（只读视图）。
 // types 里是该家可用的动作，候选（能吃/碰的牌组、能杠的 kans、和牌的役与基本点）挂在对应字段上。
@@ -46,13 +46,23 @@ export class MahjongContext implements Action {
   }
 }
 
-// 一次询问：ctxs 里的家按顺序回答。
-// 顺序是库排的：先问能和的人（荣和能多家），再问碰/明杠，最后问吃；自家回合只有这一家。
-// apply() 返回 true = 这一圈已经定了，剩下的不用再问；false = 这一家答了，接着问下一家。
+// 一圈询问里的一格：
+//   phase = 'ron'   问这一家"要不要荣和这张牌"（能和的人才会有这一格，可多家）
+//   phase = 'claim' 问这一家"要不要碰/明杠/吃这张牌"（能吃碰杠的人才有）
+//   phase = 'turn'  自家回合（刚摸完牌或刚吃碰完），问"这一手做什么"
+// 能荣和的人想改成碰/杠/吃时，会先有一格 'ron' 再有一格 'claim'：先答跳过、再答要牌。
+export interface PromptSlot {
+  ctx: MahjongContext
+  phase: 'ron' | 'claim' | 'turn'
+}
+
+// 一次询问：slots 按顺序回答。
+// 顺序是库排的：先问能和的人（荣和能多家），再问碰/明杠，最后问吃。
+// apply() 返回 true = 这一圈已经定了，剩下的不用再问；false = 这一格答了，接着问下一格。
 // 动作不合法（不在 ctx.types、候选不对、顺序不对）会抛 MahjongError，那一家还算没答过，可以重问。
 export interface Prompt {
   type: 'prompt'
-  ctxs: MahjongContext[]
+  slots: PromptSlot[]
   apply(ctx: MahjongContext, decision: Decision): boolean
 }
 
@@ -166,28 +176,54 @@ export class Mahjong {
         if (onRoundEnd?.(step.end, step.canContinue) === false) break
         continue
       }
-      for (const ctx of step.ctxs) {
+      for (const slot of step.slots) {
         // choose 没给动作就当作 pass（自家回合没有 pass，库里会抛 action-not-allowed）
-        const decision = (await choose(ctx)) ?? { action: 'pass' } as const
-        if (step.apply(ctx, decision)) break
+        const decision = (await choose(slot.ctx)) ?? { action: 'pass' } as const
+        if (step.apply(slot.ctx, decision)) break
       }
     }
     return this.score
   }
 
-  // 一次询问：答到第几家、收到了哪些荣和，这些状态放在闭包里
+  // 一次询问：答到哪一格、收到了哪些荣和，这些状态放在闭包里。
+  // 每一格是"某一家 + 这一刻问什么"：荣和单独一格，鸣牌再单独一格，所以能荣和的人会被问两次。
+  // 自家回合（这一家没有 pass）就只有一格，问要打什么。
   private createPrompt(ctxs: MahjongContext[], drawer?: PlayerId): Prompt {
+    const slots: PromptSlot[] = []
+    if (ctxs.every(ctx => !ctx.types.has('pass'))) {
+      slots.push({ ctx: ctxs[0], phase: 'turn' })
+    } else {
+      for (const ctx of ctxs) if (ctx.types.has('ron')) slots.push({ ctx, phase: 'ron' })
+      for (const ctx of ctxs) if (ctx.types.has('pon') || ctx.types.has('kan')) slots.push({ ctx, phase: 'claim' })
+      for (const ctx of ctxs) if (ctx.types.has('chi') && !ctx.types.has('pon') && !ctx.types.has('kan')) {
+        slots.push({ ctx, phase: 'claim' })
+      }
+    }
     let index = 0
     let finished = false
     const ronners: MahjongContext[] = []
+    // 一家答完之后的结算：荣和只要"能和的都答完了"就能定（剩下的鸣牌格不用再问）；
+    // 都没要（也没人荣和）且没有格子了 → 收尾
+    const settle = (): boolean => {
+      if (ronners.length !== 0 && !slots.slice(index).some(slot => slot.phase === 'ron')) {
+        finished = true
+        this.ron(ronners)
+        return true
+      }
+      if (index < slots.length) return false
+      finished = true
+      this.passAll(ctxs, drawer)
+      return true
+    }
     return {
       type: 'prompt',
-      ctxs,
+      slots,
       apply: (ctx, decision) => {
         if (finished) throw new MahjongError('prompt-done', '这一圈已经定了，不用再回答')
-        if (ctxs[index] !== ctx) {
-          const next = ctxs[index]
-          throw new MahjongError('out-of-order', `请按 ctxs 的顺序回答：现在该 ${next ? `${next.player.id} 家` : '（没有人）'}`)
+        const slot = slots[index]
+        if (slot?.ctx !== ctx) {
+          const expect = slot?.ctx
+          throw new MahjongError('out-of-order', `请按 slots 的顺序回答：现在该 ${expect ? `${expect.player.id} 家` : '（没有人）'}`)
         }
         // 跳过：还有人没问就继续问，全问完才收尾（见逃、抢杠补岭上、继续摸牌）
         if (decision.action === 'pass') {
@@ -195,29 +231,21 @@ export class Mahjong {
             throw new MahjongError('action-not-allowed', '跳过: 轮到自家打牌时不能跳过')
           }
           index++
-          if (index < ctxs.length) return false
-          finished = true
-          // 前面已经有人喊了荣和（只是等这一圈问完）→ 由荣和定，不然才是真跳过
-          if (ronners.length !== 0) {
-            this.ron(ronners)
-          } else {
-            this.passAll(ctxs, drawer)
-          }
-          return true
+          return settle()
         }
         // 荣和：要等能和的人全答完才能定（頭ハネ挑离放铳者最近的，多家荣和要收齐）
         if (decision.action === 'ron') {
           if (!ctx.types.has('ron')) throw new MahjongError('action-not-allowed', '荣和: 现在不能荣和')
-          index++
+          if (slot.phase !== 'ron') {
+            throw new MahjongError('out-of-order', '这一格问的是要不要吃碰杠：荣和在前面那一格已经答过跳过了')
+          }
           ronners.push(ctx)
-          if (ctxs.slice(index).some(c => c.types.has('ron'))) return false
-          finished = true
-          this.ron(ronners)
-          return true
+          index++
+          return settle()
         }
         // 要牌（吃碰杠）与自家动作：不能抢在还没回答的荣和前头。
-        // 先执行再记"答过"：动作不合法会抛错，这一家还算没答，可以重问。
-        if (ctxs.slice(index).some(c => c.types.has('ron'))) {
+        // 先执行再记"答过"：动作不合法会抛错（比如候选不对），这一格还算没答，可以重问。
+        if (slots.slice(index).some(slot => slot.phase === 'ron')) {
           throw new MahjongError('out-of-order', '还有人没答完荣和，先问完他们')
         }
         this.applyDecision(ctx, decision)

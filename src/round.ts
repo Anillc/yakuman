@@ -116,6 +116,13 @@ export class Round {
     this.players = playerIds.map(id => new Player(this, id, setPlayerId(tiles.splice(0, 13), id)))
     this.haiyama = tiles
     this.mopai(true, this.dealer)
+    // 配牌就听牌的人也要能荣和第一张弃牌，所以非庄家的听牌张先算出来。
+    // （庄家这时手里是 14 张，"打完之后听什么"要等他打牌时才知道，dahai 里会算）
+    for (const player of this.players) {
+      if (player.id === this.dealer) continue
+      const [shanten, waits] = player.calcShantenAndWaits()
+      player.waits = shanten === 0 ? waits : null
+    }
   }
 
   // 自风：庄家为东，庄家的下家为南、再下家为西、对家为北
