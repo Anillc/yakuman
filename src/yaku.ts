@@ -162,7 +162,7 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
     yaku.fu += 2
     if (round.firstTurnIntact) {
       // 天和：庄家第一巡自摸；其余为地和
-      if (player.kaze === round.dealer) {
+      if (player.isDealer) {
         yaku.tenhou = 13
       } else {
         yaku.chiihou = 13
@@ -585,7 +585,7 @@ function normalYaku(
     }
     // 自风
     // 自风（庄家为东，随庄家轮转）
-    if (block.suit === 'kaze' && kazes[block.tiles[0] - 1] === round.seatWind(player.kaze)) {
+    if (block.suit === 'kaze' && kazes[block.tiles[0] - 1] === player.seatWind) {
       result.jikaze = 1
     }
     // 白发中
@@ -605,7 +605,7 @@ function normalYaku(
       yakuhaiPair = true
       result.fu += 2
     }
-    if (kaze === round.seatWind(player.kaze)) {
+    if (kaze === player.seatWind) {
       yakuhaiPair = true
       result.fu += 2
     }

@@ -1,4 +1,4 @@
-import { Kaze, Tile, Suit, suits } from './round'
+import { Kaze, PlayerId, Tile, Suit, suits } from './round'
 import { Block, Decomposed, NumberDecomposed, blockTypes } from './tenpai'
 import uniqWith from 'lodash.uniqwith'
 
@@ -117,6 +117,11 @@ export function shimocha(kaze: Kaze): Kaze {
     case 'pei':
       return 'ton'
   }
+}
+
+// 下一位玩家
+export function nextId(id: PlayerId): PlayerId {
+  return ((id + 1) % 4) as PlayerId
 }
 
 export function arrayEquals<T>(a: T[], b: T[]) {

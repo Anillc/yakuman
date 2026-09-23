@@ -1,9 +1,13 @@
 import { Decomposed, decompose, shanten } from './tenpai'
-import { TileKind, compareTileKind, createEmptyCounts, group, shimocha, shuffle, toTileKinds, uniqTileKinds } from './utils'
+import { TileKind, compareTileKind, createEmptyCounts, group, nextId, shimocha, shuffle, toTileKinds, uniqTileKinds } from './utils'
 import { Yaku, canHora, yaku } from './yaku'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 export const kazes: Kaze[] = ['ton', 'nan', 'sha', 'pei']
+
+// 玩家编号（0-3）：玩家本身用 id 识别；自风随庄家轮换，见 seatWind()
+export type PlayerId = 0 | 1 | 2 | 3
+export const playerIds: PlayerId[] = [0, 1, 2, 3]
 
 export type Sangen = 'white' | 'green' | 'red'
 export const sangens: Sangen[] = ['white', 'green', 'red']
@@ -13,10 +17,12 @@ export const suits: Suit[] = ['pin', 'so', 'man', 'kaze', 'sangen']
 
 export class Tile implements TileKind {
   riichi = false
+  // 这张牌是摸切打出去的（false = 手切；吃碰之后的打牌也算手切）
+  tsumogiri = false
   from: {
     // 巡
     turn?: number
-    seat?: Kaze
+    playerId?: PlayerId
   } = {}
 
   constructor(
@@ -39,7 +45,7 @@ export class Tile implements TileKind {
 
 export type ActionType = 
   | 'chi' | 'pon' | 'kan' | 'riichi' | 'ryuukyoku'
-  | 'tsumo' | 'ron' | 'dahai' | 'cancel'
+  | 'tsumo' | 'ron' | 'tedashi' | 'tsumogiri' | 'pass'
 export interface Action {
   types: Set<ActionType>
   chiTiles?:    Tile[][]
@@ -54,11 +60,9 @@ export class Round {
   kanCount: number = 0
   haiyama: Tile[]
 
-  ton: Player
-  nan: Player
-  sha: Player
-  pei: Player
-  currentSeat: Kaze = 'ton'
+  // 四家（下标就是玩家编号）
+  players: Player[]
+  currentId: PlayerId = 0
 
   // 巡
   turn: number = 0
@@ -77,8 +81,8 @@ export class Round {
   constructor (
     // 场风
     public bakaze: Kaze,
-    // 庄家（本局的亲家座位）
-    public dealer: Kaze,
+    // 庄家（本局是谁坐庄，用玩家编号）
+    public dealer: PlayerId,
     tiles?: Tile[],
   ) {
     if (!tiles) {
@@ -107,27 +111,24 @@ export class Round {
       }
       shuffle(tiles)
     }
-    function setKaze(tiles: Tile[], kaze: Kaze) {
+    function setPlayerId(tiles: Tile[], id: PlayerId) {
       for (const tile of tiles) {
-        tile.from.seat = kaze
+        tile.from.playerId = id
       }
       return tiles
     }
-    this.ton = new Player(this, 'ton', setKaze(tiles.splice(0, 13), 'ton'))
-    this.nan = new Player(this, 'nan', setKaze(tiles.splice(0, 13), 'nan'))
-    this.sha = new Player(this, 'sha', setKaze(tiles.splice(0, 13), 'sha'))
-    this.pei = new Player(this, 'pei', setKaze(tiles.splice(0, 13), 'pei'))
+    this.players = playerIds.map(id => new Player(this, id, setPlayerId(tiles.splice(0, 13), id)))
     this.haiyama = tiles
     this.mopai(true, this.dealer)
   }
 
   // 自风：庄家为东，庄家的下家为南、再下家为西、对家为北
-  seatWind(kaze: Kaze): Kaze {
-    return kazes[(kazes.indexOf(kaze) - kazes.indexOf(this.dealer) + 4) % 4]
+  seatWind(id: PlayerId): Kaze {
+    return kazes[(id - this.dealer + 4) % 4]
   }
 
   get player(): Player {
-    return this[this.currentSeat]
+    return this.players[this.currentId]
   }
 
   get rest() {
@@ -153,50 +154,47 @@ export class Round {
     return [dora.slice(0, revealed), uradora.slice(0, revealed)]
   }
 
-  // 如果没有提供 kaze 参数，则切换到下家并摸牌
+  // 如果没有提供 id，则轮到下家并摸牌
   // 返回 true 则为听牌
-  mopai(keepTurn?: boolean, kaze?: Kaze, isRinshan?: boolean): boolean {
-    kaze ||= shimocha(this.currentSeat)
+  mopai(keepTurn?: boolean, id?: PlayerId, isRinshan?: boolean): boolean {
+    id ??= nextId(this.currentId)
     const tile = this.haiyama.shift()
-    tile.from.seat = kaze
-    this[kaze].tiles.push(tile)
+    tile.from.playerId = id
+    this.players[id].tiles.push(tile)
     // 摸牌后上一张打出的牌就作废了（否则杠后补牌会被当成"刚打过牌"）
     this.kiru = null
     this.rinshan = !!isRinshan
-    this.currentSeat = kaze
+    this.currentId = id
     // 巡目以庄家为起点：庄家摸第二次就算进入下一巡；吃碰不摸牌，所以不会推进巡目
-    if (!keepTurn && kaze === this.dealer) {
+    if (!keepTurn && id === this.dealer) {
       this.turn++
       // 第一巡的第一次摸牌 keepTurn 为 true，所以不会在这里破坏初巡役
       this.breakFirstTurnFlags()
     }
-    return this.updateDiscardTenpai()
+    return this.updateTenpaiCache()
   }
 
-  // 计算"打掉每张牌之后的听牌张"，摸牌后调用；
-  // 吃、碰没有摸牌，也要在打牌前补算一次，否则之后无法荣和
-  private updateDiscardTenpai(): boolean {
-    const options = this.player.calcShantenPerDiscard()
-    const tenpaiOptions = options.filter(([, shanten]) => shanten === 0)
-    if (tenpaiOptions.length !== 0) {
-      this.player.discardTenpai = tenpaiOptions.map(([dahai, , waits]) => {
-        const tiles = [...this.player.tiles]
-        const index = tiles.findIndex(tile => tile.equals(dahai))
-        if (index === -1) throw new Error('unreachable')
-        tiles.splice(index, 1)
-        const horaFlags = waits.map(wait =>
-          canHora(yaku(this, this.player, wait, false, false, tiles)[0]))
-        return [dahai, waits, horaFlags]
-      })
-      return true
-    }
-    this.player.discardTenpai = null
-    return false
+  // 这一家"打哪张能听牌"的缓存：摸牌后、吃碰后重算一次，打牌后清空。
+  // 纯性能缓存：一次完整向听分解约 10ms，而一个回合内有三处要用同一份结果
+  // （mopai 判断是否听牌、action 的立直/自摸判定、dahai 里算 player.waits）。
+  // 正确性不依赖它 —— 对外请用 player.tenpaiDiscards() / player.waitsAfterDiscard()，那两个总是现算。
+  // TODO: 以后做性能优化时可以重新评估：要么去掉这个缓存、让三处各自现算（状态更少），
+  //       要么把向听计算本身做快（那时缓存就没必要了）。
+  private tenpaiCache: { discard: TileKind, waits: TileKind[] }[] = null
+
+  private updateTenpaiCache(): boolean {
+    const options = this.player.tenpaiDiscards()
+    this.tenpaiCache = options.length === 0 ? null : options
+    return options.length !== 0
   }
 
   // 打牌
   dahai(tile: Tile, riichi: boolean) {
-    this.player.tiles.splice(this.player.tiles.indexOf(tile), 1)
+    const index = this.player.tiles.indexOf(tile)
+    if (index === -1) throw new Error('dahai: 这张牌不在手牌里')
+    // 摸切 = 打出的就是刚摸到的那张（吃碰之后的打牌算手切）
+    tile.tsumogiri = !this.kiru && index === this.player.tiles.length - 1
+    this.player.tiles.splice(index, 1)
     tile.from.turn = this.turn
     this.kiru = tile
     this.player.discards.push(tile)
@@ -211,7 +209,7 @@ export class Round {
     const isTerminal = ['man', 'so', 'pin'].includes(tile.suit) && (tile.rank === 1 || tile.rank === 9)
     const isHonor = ['kaze', 'sangen'].includes(tile.suit)
     if (!isTerminal && !isHonor) {
-      this.removeRyuukyokuMangan(this.currentSeat)
+      this.removeRyuukyokuMangan(this.currentId)
     }
     if (this.firstTurnIntact) {
       if (this.sufurenda === null) {
@@ -225,12 +223,13 @@ export class Round {
           this.sufurenda = false
         }
       }
-      if (this.sufurenda && this.currentSeat === 'pei') {
+      // 四风连打：四家都打出同一张风牌（最后一家是 3 号玩家）
+      if (this.sufurenda && this.currentId === 3) {
         this.sufurenda = true
       }
     }
-    if (this.player.discardTenpai) {
-      this.player.waits = this.player.discardTenpai.find(([discard]) => tile.equals(discard))?.[1]
+    if (this.tenpaiCache) {
+      this.player.waits = this.tenpaiCache.find(option => compareTileKind(option.discard, tile) === 0)?.waits
       if (riichi) {
         if (!this.player.waits || this.player.naki !== 0) {
           throw new Error('unreachable')
@@ -246,40 +245,42 @@ export class Round {
       this.player.waits = null
       if (riichi) throw new Error('unreachable')
     }
-    this.player.discardTenpai = null
+    this.tenpaiCache = null
     // 岭上标记只描述刚摸到的那张牌
     this.rinshan = false
   }
 
-  // chi/pon/minkan 的 kaze 是鸣牌的那一家（吃只有下家能吃，chi 内部自己算）
+  // chi/pon/minkan 的 id 是鸣牌的那一家（玩家编号）（吃只有下家能吃，chi 内部自己算）
   // ankan/chakan 用当前摸牌玩家，也就是 this.player
 
   chi(tiles: Tile[]) {
     tiles = [...tiles]
-    const kaze = shimocha(this.currentSeat)
-    const player = this[kaze]
+    const id = nextId(this.currentId)
+    const player = this.players[id]
     for (const tile of tiles) {
       tile.from.turn = this.turn
       const index = player.tiles.indexOf(tile)
+      if (index === -1) throw new Error("鸣牌: 这张牌不在手牌里")
       player.tiles.splice(index, 1)
     }
     this.player.discards.pop()
     tiles.push(this.kiru)
     // 顺子按升序存放：三色同顺/一气通贯靠比较 tiles 数组判断
     player.chi.push(tiles.sort(compareTileKind))
-    this.currentSeat = kaze
+    this.currentId = id
     this.breakFirstTurnFlags()
-    this.removeRyuukyokuMangan(this.kiru.from.seat)
+    this.removeRyuukyokuMangan(this.kiru.from.playerId)
     // 吃没有摸牌，这里补算切牌后的听牌张
-    this.updateDiscardTenpai()
+    this.updateTenpaiCache()
   }
 
-  pon(kaze: Kaze, tiles: Tile[]) {
+  pon(id: PlayerId, tiles: Tile[]) {
     tiles = [...tiles]
-    const player = this[kaze]
+    const player = this.players[id]
     for (const tile of tiles) {
       tile.from.turn = this.turn
       const index = player.tiles.indexOf(tile)
+      if (index === -1) throw new Error("鸣牌: 这张牌不在手牌里")
       player.tiles.splice(index, 1)
     }
     this.player.discards.pop()
@@ -288,19 +289,20 @@ export class Round {
       tiles,
       chakan: false,
     })
-    this.currentSeat = kaze
+    this.currentId = id
     this.breakFirstTurnFlags()
-    this.removeRyuukyokuMangan(this.kiru.from.seat)
+    this.removeRyuukyokuMangan(this.kiru.from.playerId)
     // 碰没有摸牌，这里补算切牌后的听牌张
-    this.updateDiscardTenpai()
+    this.updateTenpaiCache()
   }
 
-  minkan(kaze: Kaze, tiles: Tile[]) {
+  minkan(id: PlayerId, tiles: Tile[]) {
     tiles = [...tiles]
-    const player = this[kaze]
+    const player = this.players[id]
     for (const tile of tiles) {
       tile.from.turn = this.turn
       const index = player.tiles.indexOf(tile)
+      if (index === -1) throw new Error("鸣牌: 这张牌不在手牌里")
       player.tiles.splice(index, 1)
     }
     this.player.discards.pop()
@@ -308,8 +310,8 @@ export class Round {
     player.minkan.push(tiles)
 
     // 摸牌会把 kiru 清空，先记住放铳者是谁
-    const discarder = this.kiru.from.seat
-    this.mopai(true, kaze, true)
+    const discarder = this.kiru.from.playerId
+    this.mopai(true, id, true)
     this.kanCount++
     this.breakFirstTurnFlags()
     this.removeRyuukyokuMangan(discarder)
@@ -321,6 +323,7 @@ export class Round {
     for (const tile of tiles) {
       tile.from.turn = this.turn
       const index = this.player.tiles.indexOf(tile)
+      if (index === -1) throw new Error("暗杠: 这张牌不在手牌里")
       this.player.tiles.splice(index, 1)
     }
     this.player.ankan.push(tiles)
@@ -331,20 +334,21 @@ export class Round {
 
   chakan(tile: Tile) {
     tile.from.turn = this.turn
-    for (const pon of this.player.pon) {
-      if (pon.tiles[0].equals(tile)) {
-        pon.tiles.push(tile)
-        pon.chakan = true
-      }
-    }
+    const pon = this.player.pon.find(pon => pon.tiles[0].equals(tile))
+    if (!pon) throw new Error('加杠: 没有可以加杠的碰')
+    if (!this.player.tiles.includes(tile)) throw new Error('加杠: 这张牌不在手牌里')
+    if (pon.chakan) throw new Error('加杠: 这组碰已经加杠过了')
+    this.player.tiles.splice(this.player.tiles.indexOf(tile), 1)
+    pon.tiles.push(tile)
+    pon.chakan = true
     this.kiru = tile
     this.kanCount++
     this.breakFirstTurnFlags()
   }
 
   // 见逃
-  minogashi(kaze: Kaze) {
-    const player = this[kaze]
+  minogashi(id: PlayerId) {
+    const player = this.players[id]
     player.dojunfuriten = true
   }
 
@@ -352,20 +356,20 @@ export class Round {
   breakFirstTurnFlags() {
     this.firstTurnIntact = false
     this.sufurenda = false
-    for (const kaze of kazes) {
-      if (this[kaze].riichi) {
-        this[kaze].riichi.iipatsu = false
+    for (const id of playerIds) {
+      if (this.players[id].riichi) {
+        this.players[id].riichi.iipatsu = false
       }
     }
   }
 
-  removeRyuukyokuMangan(kaze: Kaze) {
-    this[kaze].ryuukyokuMangan = false
+  removeRyuukyokuMangan(id: PlayerId) {
+    this.players[id].ryuukyokuMangan = false
   }
 
-  tileRest(kaze: Kaze, suit: Suit, rank: number) {
+  tileRest(id: PlayerId, suit: Suit, rank: number) {
     let rest = 4
-    const players = [this.ton, this.nan, this.sha, this.pei]
+    const players = this.players
     for (const player of players) {
       const tiles = [
         ...player.discards,
@@ -378,7 +382,7 @@ export class Round {
         if (tile.equals(suit, rank)) rest--
       }
     }
-    for (const tile of this[kaze].tiles) {
+    for (const tile of this.players[id].tiles) {
       if (tile.equals(suit, rank)) rest--
     }
     const [dorahyoji] = this.dorahyoji
@@ -388,16 +392,16 @@ export class Round {
     return rest
   }
 
-  // kiru.from.seat === currentSeat：这一家就是最后打牌的人，已经打过牌了，在等别人响应
+  // kiru.from.playerId === currentSeat：这一家就是最后打牌的人，已经打过牌了，在等别人响应
   // 否则：这一家还没打牌（刚摸完牌，或刚吃/碰完），由他们打牌
   // 返回 null 则为不需要操作
-  action(kaze: Kaze, isChankan?: boolean, isAnkanChankan?: boolean): Action {
-    const beforeDiscard = !this.kiru || this.kiru.from.seat !== this.currentSeat
+  action(id: PlayerId, isChankan?: boolean, isAnkanChankan?: boolean): Action {
+    const beforeDiscard = !this.kiru || this.kiru.from.playerId !== this.currentId
     if (beforeDiscard) {
-      if (kaze !== this.currentSeat) return null
+      if (id !== this.currentId) return null
       const action: Action = { types: new Set() }
       if (this.firstTurnIntact) {
-        const counts = group(this[kaze].tiles)
+        const counts = group(this.players[id].tiles)
         const yaochu = [
           counts['man'][0], counts['man'][8],
           counts['so'][0], counts['so'][8],
@@ -411,9 +415,9 @@ export class Round {
       // 最后一张牌的时候没有杠
       if (this.rest !== 0 && this.kanCount < 4) {
         const ankan = this.player.ankanTiles
-        if (this[kaze].riichi) {
+        if (this.players[id].riichi) {
           const riichiAnkan = ankan.filter(ankan => {
-            return this[kaze].riichi.decomposed.every(dec => {
+            return this.players[id].riichi.decomposed.every(dec => {
               return dec.blocks.find(block => block.type === 'kotsu'
                 && ankan[0].equals(block.suit, block.tiles[0]))
             })
@@ -430,22 +434,22 @@ export class Round {
         }
         const chakan = this.player.chakanTiles
         if (chakan.length !== 0) {
-          if (this[kaze].riichi) throw new Error('unreachable')
+          if (this.players[id].riichi) throw new Error('unreachable')
           action.types.add('kan')
           action.chakanTiles = chakan
         }
       }
-      if (this.player.discardTenpai && this.player.discardTenpai.length !== 0) {
+      if (this.tenpaiCache && this.tenpaiCache.length !== 0) {
         // kiru 为空说明这一手是真的摸牌（吃、碰后不是），只有摸牌才能立直/自摸
         const justDrew = !this.kiru
         if (justDrew && !this.player.riichi && this.player.naki === 0 && this.rest >= 4){
           action.types.add('riichi')
         }
         if (justDrew) {
-          for (const [kiru, tp] of this.player.discardTenpai) {
-            const canWin = tp.some(tileKind => compareTileKind(kiru, tileKind) === 0)
+          for (const option of this.tenpaiCache) {
+            const canWin = option.waits.some(wait => compareTileKind(option.discard, wait) === 0)
             if (canWin) {
-              const [yakuResult, points] = yaku(this, this[kaze], null, true, false)
+              const [yakuResult, points] = yaku(this, this.players[id], null, true, false)
               if (canHora(yakuResult)) {
                 action.hora = { yaku: yakuResult, points }
                 action.types.add('tsumo')
@@ -455,17 +459,20 @@ export class Round {
           }
         }
       }
-      action.types.add('dahai')
+      // 打牌：吃过/碰过之后没有刚摸的牌，只能手切；立直中只能摸切
+      const justDrew = !this.kiru
+      if (!justDrew || !this.player.riichi) action.types.add('tedashi')
+      if (justDrew) action.types.add('tsumogiri')
       return action
     } else {
       // 刚打出牌
-      if (kaze === this.currentSeat) return null
+      if (id === this.currentId) return null
       const action: Action = { types: new Set() }
-      const waits = this[kaze].waits
+      const waits = this.players[id].waits
       let tileKind: TileKind
       if (waits && (tileKind = waits.find(wait => this.kiru.equals(wait)))) {
-        const [yakuResult, points] = yaku(this, this[kaze], this.kiru, false, isChankan)
-        if (canHora(yakuResult) && !this[kaze].furiten && !this[kaze].dojunfuriten) {
+        const [yakuResult, points] = yaku(this, this.players[id], this.kiru, false, isChankan)
+        if (canHora(yakuResult) && !this.players[id].furiten && !this.players[id].dojunfuriten) {
           if (isChankan) {
             // 抢杠和国士无双抢暗杠
             if (!isAnkanChankan || (isAnkanChankan && (yakuResult.kokushiMusou || yakuResult.kokushiMusou13))) {
@@ -478,23 +485,23 @@ export class Round {
           }
         } else if (canHora(yakuResult)) {
           // 能和但被振听挡住（或见逃）→ 记同巡振听；无役不算见逃
-          this.minogashi(kaze)
+          this.minogashi(id)
         }
       }
       // 杠（暗杠/加杠）之后只可能被抢杠，不能吃碰：kiru 这时是一张杠牌
-      if (!isChankan && this.rest !== 0 && !this[kaze].riichi) {
-        const pon = this[kaze].ponTiles
+      if (!isChankan && this.rest !== 0 && !this.players[id].riichi) {
+        const pon = this.players[id].ponTiles
         if (pon.length !== 0) {
           action.types.add('pon')
           action.ponTiles = pon
         }
-        const minkan = this[kaze].minkanTiles
+        const minkan = this.players[id].minkanTiles
         if (minkan.length !== 0 && this.kanCount < 4) {
           action.types.add('kan')
           action.minkanTiles = minkan
         }
-        if (kaze === shimocha(this.currentSeat)) {
-          const chi = this[kaze].chiTiles
+        if (id === nextId(this.currentId)) {
+          const chi = this.players[id].chiTiles
           if (chi.length !== 0) {
             action.types.add('chi')
             action.chiTiles = chi
@@ -504,7 +511,7 @@ export class Round {
       if (action.types.size === 0) {
         return null
       } else {
-        action.types.add('cancel')
+        action.types.add('pass')
         return action
       }
     }
@@ -534,8 +541,6 @@ export class Player {
 
   // 打牌时设置
   waits: TileKind[]
-  // 摸牌后 / 吃碰后设置（每种切牌选择对应的听牌张），打牌时清除
-  discardTenpai: [dahai: TileKind, waits: TileKind[], canHora: boolean[]][]
 
   dojunfuriten = false
   // 已切的牌，用于计算舍张振听
@@ -545,7 +550,8 @@ export class Player {
 
   constructor(
     public round: Round,
-    public kaze: Kaze,
+    // 玩家的编号（ton/nan/sha/pei 只是名字，不代表自风；自风请用 round.seatWind(id)）
+    public id: PlayerId,
     public tiles: Tile[],
   ) {}
 
@@ -556,18 +562,43 @@ export class Player {
     return shanten(counts, naki)
   }
 
-  calcShantenPerDiscard(): [TileKind, number, TileKind[]][] {
-    const tileKind = uniqTileKinds(toTileKinds(this.tiles))
-    return tileKind.map(tileKind => {
+  // 打每张牌之后的向听（含未听牌的切法），按需计算
+  shantenPerDiscard(): { discard: TileKind, shanten: number, waits: TileKind[] }[] {
+    const kinds = uniqTileKinds(toTileKinds(this.tiles))
+    return kinds.map(discard => {
       const tiles = [...this.tiles]
-      tiles.splice(tiles.findIndex(tile => tile.equals(tileKind)), 1)
-      return [tileKind, ...this.calcShantenAndWaits(tiles)]
+      tiles.splice(tiles.findIndex(tile => tile.equals(discard)), 1)
+      const [shanten, waits] = this.calcShantenAndWaits(tiles)
+      return { discard, shanten, waits }
     })
+  }
+
+  // 打哪张能听牌（听牌张一栏为空 = 无役听牌也算听牌；"有没有役"请另外查）
+  tenpaiDiscards(): { discard: TileKind, waits: TileKind[] }[] {
+    return this.shantenPerDiscard()
+      .filter(option => option.shanten === 0)
+      .map(({ discard, waits }) => ({ discard, waits }))
+  }
+
+  // 打这张之后听什么；不听牌则 null
+  waitsAfterDiscard(tileKind: TileKind): TileKind[] | null {
+    return this.tenpaiDiscards()
+      .find(option => compareTileKind(option.discard, tileKind) === 0)?.waits ?? null
   }
 
   // 鸣牌数量（暗杠不算，算向听/和牌时要另外加 player.ankan.length）
   get naki() {
     return this.chi.length + this.pon.length + this.minkan.length
+  }
+
+  // 本局的自风（随庄家轮换）
+  get seatWind(): Kaze {
+    return this.round.seatWind(this.id)
+  }
+
+  // 本局是不是庄家
+  get isDealer(): boolean {
+    return this.round.dealer === this.id
   }
 
   get chiTiles() {
