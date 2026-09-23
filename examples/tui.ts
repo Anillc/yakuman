@@ -14,14 +14,13 @@ program
   .name('tui')
   .description('日本麻将 TUI example（和 tests/interactive.ts 用同一套规则）')
   .option('--seat <seat>', '你操作哪一家：0-3 或 ton/nan/sha/pei', '0')
-  .option('--rounds <rounds>', '打几局', '2')
   .option('--seed <seed>', '牌山种子（固定住就能复现同一局）', '20230514')
   .option('--demo', '四家都交给机器人自动打')
   .option('--snapshot [path]', '不交互：打几手后把画面以纯文本输出（给路径就写文件，不给就打到 stdout）')
   .option('--after <after>', '配合 --snapshot：答完 N 格就停在那一格截图')
   .addHelpText('after', `
 例子：
-  yarn tsx examples/tui.ts --seat=0 --rounds=2         自己打一家，其余机器人
+  yarn tsx examples/tui.ts --seat=0                    自己打一家，其余机器人（打到半庄结束）
   yarn tsx examples/tui.ts --demo --seed=7             四家机器人，看效果
   yarn tsx examples/tui.ts --snapshot --after=120      第 120 手时的画面打到 stdout
   yarn tsx examples/tui.ts --snapshot=/tmp/f.txt       同上，写进文件`)
@@ -36,7 +35,6 @@ if (SEAT === undefined) {
   process.stderr.write(`--seat 只能是 0-3 或 ton/nan/sha/pei，收到的是 "${seatArg}"\n`)
   process.exit(1)
 }
-const ROUNDS = Number(options.rounds)
 const SEED = Number(options.seed)
 const DEMO = Boolean(options.demo)
 // 不带值的 --snapshot 是 true，带路径的是字符串；统一成"'' = 打到 stdout，非空 = 写文件"
@@ -266,7 +264,7 @@ function renderBoard(width: number, height: number, highlight?: PromptSlot) {
 
   // 中间：场况 + 这一格的候选，横竖都居中
   const center = [
-    `{bold}${mahjong.bakaze === 'ton' ? '东' : mahjong.bakaze === 'nan' ? '南' : '西'}${mahjong.kyoku}局{/bold}   本场 ${mahjong.homba}`,
+    `{bold}${kyokuName()}{/bold}   本场 ${mahjong.homba}`,
     `宝牌 {cyan-fg}${toMPSZ(round.dorahyoji[0])}{/cyan-fg}`,
     `牌山 ${round.rest}   立直棒 ${mahjong.riichibo}`,
   ]
@@ -304,14 +302,19 @@ function renderBoard(width: number, height: number, highlight?: PromptSlot) {
 }
 
 // 手牌和下面的提示（和牌桌分开画，方便按终端宽度各自居中）
-function renderHand() {
+function renderHand(slot?: PromptSlot) {
   const { drawn, display } = myTiles()
   const handText = display.map((t, i) => {
     const card = i === cursor ? `{inverse} ${tile(t)} {/inverse}` : ` ${tile(t)} `
     return drawn && i === display.length - 1 ? `{gray-fg}│{/gray-fg}${card}` : card
   }).join('')
+  const player = mahjong.round.players[SEAT]
   const card = display[cursor]
-  const waits = card ? mahjong.round.players[SEAT].waitsAfterDiscard(card) : null
+  // 只有"轮到自己打牌"时才给这个提示：不是自己的回合没什么可打的，
+  // 立直中也只能摸切，光标停在别的牌上不该按它算听牌张（会看到打不出去的牌的听牌）
+  const myTurn = slot?.phase === 'turn' && slot.ctx.player.id === SEAT
+  const discardable = card !== undefined && (!player.riichi || card === drawn)
+  const waits = myTurn && discardable ? player.waitsAfterDiscard(card) : null
   // 空数组 = 听牌但一张都抽不到（等的那张自己攥着 4 张），也要显示出来
   const waitsText = waits === null ? ''
     : `   {green-fg}打这张听 ${waits.length === 0 ? '(0 张)' : toMPSZ(waits)}{/green-fg}`
@@ -379,7 +382,7 @@ function draw(slot?: PromptSlot) {
   const table = renderBoard(tableWidth, tableHeight, slot).lines()
   const keys = '{gray-fg}牌河：灰=摸切 黄=立直宣言牌 · ←/→ 选牌 · Enter 打出 · m 摸切 · r 立直 · t 自摸 · o 荣和 · 1-9 选候选 · q 跳过 · Q 退出{/gray-fg}'
   const footer = [
-    ...renderHand(),
+    ...renderHand(slot),
     keys,
     ...(notice ? [`{red-fg}${notice}{/red-fg}`] : []),
     ...results.slice(-2),
@@ -401,6 +404,9 @@ function draw(slot?: PromptSlot) {
 }
 
 // 这一格能做什么
+// 场风 + 局数（"南4局"），牌桌中间和局终提示都用它
+const kyokuName = () => `${mahjong.bakaze === 'ton' ? '东' : mahjong.bakaze === 'nan' ? '南' : '西'}${mahjong.kyoku}局`
+
 // 吃/碰/明杠的候选：提示里的编号和按键都走这一份列表，免得各自从 1 开始数、按同一个键撞车
 function claimCandidates(ctx: MahjongContext) {
   const list: { label: string, decision: Decision }[] = []
@@ -531,16 +537,16 @@ function summarize(end: MahjongEnd): string {
 let answered = 0
 let lastSlot: PromptSlot | undefined
 async function play() {
-  let rounds = ROUNDS
   for await (const step of mahjong.steps()) {
     if (step.type === 'roundEnd') {
-      results.push(`{yellow-fg}【${mahjong.kyoku}局 结束】${summarize(step.end)}{/yellow-fg}`)
+      results.push(`{yellow-fg}【${kyokuName()} 结束】${summarize(step.end)}{/yellow-fg}`)
       draw()
       if (noScreen || DEMO) {
         const key = noScreen ? 'return' : await nextKey()
         if (!noScreen && key === 'Q') break
       }
-      if (rounds-- <= 1 || !step.canContinue) break
+      // 打到半庄结束（被飞、南四局结束、或轮到庄家连庄之外的收尾条件由库里判断）
+      if (!step.canContinue) break
       continue
     }
     for (let slot = step.current; slot !== null; slot = step.current) {
