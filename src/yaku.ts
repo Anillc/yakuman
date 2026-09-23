@@ -1,5 +1,5 @@
 import { Player, Round, Tile, Suit, kazes, sangens } from './round.js'
-import { Block, Decomposed, chiitoitsuShanten, decompose, kokushiMusouShanten, minShanten, normalShanten } from './tenpai.js'
+import { Block, Decomposed, chiitoitsuShanten, kokushiMusouShanten, normalShanten, waitSplits } from './tenpai.js'
 import { MahjongError, TileKind, arrayEquals, compareTileKind, group } from './utils.js'
 
 // 和牌判定的结果：役（含符与番）与基本点
@@ -106,7 +106,7 @@ type HoraType = 'chiitoitsu' | 'kokushiMusou' | 'kokushiMusou13' | 'normal'
 
 function horaType(player: Player, tiles: TileKind[]): HoraType {
   const counts = group(tiles)
-  const [shanten] = minShanten(decompose(counts), player.naki + player.ankan.length)
+  const shanten = normalShanten(counts, player.naki + player.ankan.length)
   const chiitoitsu = chiitoitsuShanten(counts)
   const kokushiMusou = kokushiMusouShanten(counts)
   if (chiitoitsu[0] === -1) {
@@ -337,7 +337,7 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
     yaku.fu = 25
   }
   if (handType === 'normal') {
-    const [, waitDecompositions] = normalShanten(group(handTiles), player.naki + player.ankan.length)
+    const waitDecompositions = waitSplits(group(handTiles))
 
     const yakus: Yaku[] = []
     for (const [wait, decs] of waitDecompositions) {

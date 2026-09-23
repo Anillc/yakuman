@@ -303,8 +303,11 @@ function renderHand() {
   }).join('')
   const card = display[cursor]
   const waits = card ? mahjong.round.players[SEAT].waitsAfterDiscard(card) : null
+  // 空数组 = 听牌但一张都抽不到（等的那张自己攥着 4 张），也要显示出来
+  const waitsText = waits === null ? ''
+    : `   {green-fg}打这张听 ${waits.length === 0 ? '(0 张)' : toMPSZ(waits)}{/green-fg}`
   return [
-    `{bold}手牌{/bold} ${handText}${waits ? `   {green-fg}打这张听 ${toMPSZ(waits)}{/green-fg}` : ''}`,
+    `{bold}手牌{/bold} ${handText}${waitsText}`,
   ]
 }
 
@@ -331,7 +334,7 @@ function botDecision(ctx: MahjongContext): Decision {
     const best = (options.length === 0 ? all : options).reduce((acc, x) => (x.shanten < acc.shanten ? x : acc))
     const discard = player.tiles.find(t => t.equals(best.discard))!
     const waits = player.waitsAfterDiscard(discard)
-    const riichi = ctx.types.has('riichi') && !!waits?.length
+    const riichi = ctx.types.has('riichi') && waits !== null
     if (discard === drawn && !ctx.round.kiru && ctx.types.has('tsumogiri')) return { action: 'tsumogiri', riichi }
     return { action: 'tedashi', tile: discard, riichi }
   }
@@ -482,7 +485,7 @@ async function humanDecision(slot: PromptSlot): Promise<Decision> {
       notice = '现在只能摸切（吃过/碰过之后只能手切）'
     } else if (key === 'r' && ctx.types.has('riichi')) {
       const card = display[cursor]
-      if (!mahjong.round.players[SEAT].waitsAfterDiscard(card)) notice = '打这张不听牌，不能立直'
+      if (mahjong.round.players[SEAT].waitsAfterDiscard(card) === null) notice = '打这张不听牌，不能立直'
       else if (card === mahjong.round.players[SEAT].tiles.at(-1) && !mahjong.round.kiru) return { action: 'tsumogiri', riichi: true }
       else return { action: 'tedashi', tile: card, riichi: true }
     }

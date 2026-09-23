@@ -1,4 +1,4 @@
-import { Decomposed, decompose, shanten } from './tenpai.js'
+import { shanten, waits } from './tenpai.js'
 import { MahjongError, TileKind, compareTileKind, createEmptyCounts, group, nextId, shimocha, shuffle, toMPSZ, toTileKinds, uniqTileKinds } from './utils.js'
 import { HoraResult, canHora, yaku } from './yaku.js'
 
@@ -243,7 +243,6 @@ export class Round {
         this.player.riichi = {
           double: this.firstTurnIntact,
           iipatsu: true,
-          decomposed: decompose(group(this.player.tiles)),
         }
       }
     } else {
@@ -429,12 +428,15 @@ export class Round {
       if (!this.kiru && this.rest !== 0 && this.kanCount < 4) {
         const ankan = this.player.ankanTiles
         if (this.players[id].riichi) {
-          // 立直中只能暗杠"不会改听牌"的那几组（同巡那张摸到的牌能不能杠由向听/分解判断）
+          // 立直中只能暗杠不改变听牌的那几组：杠前/杠后的听牌张必须一样
+          // （杠后暗牌少 4 张，那 4 张算一副暗杠）
+          const waitsBefore = this.players[id].waits ?? []
           const riichiAnkan = ankan.filter(tiles => {
-            return this.players[id].riichi.decomposed.every(dec => {
-              return dec.blocks.find(block => block.type === 'kotsu'
-                && tiles[0].equals(block.suit, block.tiles[0]))
-            })
+            const counts = group(this.players[id].tiles)
+            counts[tiles[0].suit][tiles[0].rank - 1] -= 4
+            const waitsAfter = waits(counts)
+            return waitsBefore.length === waitsAfter.length
+              && waitsBefore.every(wait => waitsAfter.some(other => compareTileKind(wait, other) === 0))
           })
           if (riichiAnkan.length !== 0) {
             action.kans = riichiAnkan.map(tiles => ({ type: 'ankan', tiles }))
@@ -569,7 +571,6 @@ function chiKuikae(called: TileKind, meld: TileKind[]): TileKind[] {
 export interface Riichi {
   double: boolean
   iipatsu: boolean
-  decomposed: Decomposed[]
 }
 
 export class Player {
@@ -580,7 +581,8 @@ export class Player {
   discards: Tile[] = []
   riichi: Riichi
 
-  // 听牌张（打完牌之后算出来）
+  // 听牌张。null = 不听牌；空数组 = 听牌但没有能抽到的和牌张（等的那张自己攥着 4 张）
+  // 判断听牌用 `waits !== null`，不要用长度
   waits: TileKind[]
 
   // 食い替え：刚吃/碰进来的那张（以及同筋的另一端）不能马上打出去，打完之后清空
@@ -618,13 +620,14 @@ export class Player {
     })
   }
 
-  // 打哪张能听牌（听牌张一栏为空 = 无役听牌也算听牌；"有没有役"请另外查）
+  // 打哪张能听牌。听牌张可能是空数组（等的那张全在自己手里），那也算听牌；有没有役另外查
   tenpaiDiscards(): { discard: TileKind, waits: TileKind[] }[] {
     return this.shantenPerDiscard()
       .filter(option => option.shanten === 0)
       .map(({ discard, waits }) => ({ discard, waits }))
   }
 
+  // null = 不听牌，返回数组（可能是空的）= 听牌；判断用 `!== null`，别用 length
   waitsAfterDiscard(tileKind: TileKind): TileKind[] | null {
     return this.tenpaiDiscards()
       .find(option => compareTileKind(option.discard, tileKind) === 0)?.waits ?? null

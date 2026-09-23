@@ -1,8 +1,110 @@
 import { Suit } from './round.js'
+import rawTables from './table.json'
 import {
-  Counts, DecomposedSet, NumberDecomposedSet, TileKind, addCounts,
-  cartesian, cloneCounts, compareTileKind, createEmptyCounts, sortBlocks, uniqTileKinds,
+  Counts, TileKind, cartesian, cloneCounts, createEmptyCounts, sortBlocks, sortTileKinds, uniqTileKinds,
 } from './utils.js'
+
+// 两张表由 utils/table.ts 生成，形状 = 单个花色 9 个位置各 0~4 张，编码成 5 进制数；
+// 万/索/筒规则相同，共用一张表。
+
+type Reading = [m: number, t: number, p: number]
+
+interface Tables {
+  shanten: { frontiers: Reading[][], index: number[] }
+  agari: { bits: number[] }
+}
+const tables = rawTables as unknown as Tables
+
+const POW5 = [1, 5, 25, 125, 625, 3125, 15625, 78125, 390625]
+
+const SUITS = ['man', 'so', 'pin', 'kaze', 'sangen'] satisfies Suit[]
+
+function encodeShape(tiles: number[]): number {
+  let code = 0
+  for (let i = 0; i < tiles.length; i++) code += tiles[i] * POW5[i]
+  return code
+}
+
+function readingsOf(tiles: number[]): Reading[] {
+  return tables.shanten.frontiers[tables.shanten.index[encodeShape(tiles)]]
+}
+
+function splittable(tiles: number[]): boolean {
+  const code = encodeShape(tiles)
+  return ((tables.agari.bits[code >> 3] >> (code & 7)) & 1) === 1
+}
+
+function honorsReading(counts: Counts): Reading {
+  let m = 0
+  let p = 0
+  for (const suit of ['kaze', 'sangen'] satisfies Suit[]) {
+    for (const n of counts[suit]) {
+      if (n >= 3) m++
+      else if (n === 2) p++
+    }
+  }
+  return [m, p, p > 0 ? 1 : 0]
+}
+
+/** 合并中间状态：x 支配 y ⟺ (Σα, Σm, P) 逐分量 ≥，被支配的永远不会更优 */
+function paretoStates(states: Reading[]): Reading[] {
+  const uniq = [...new Map(states.map(s => [s.join(','), s])).values()]
+  return uniq.filter(a => !uniq.some(b => b.join(',') !== a.join(',')
+    && b[0] >= a[0] && b[1] >= a[1] && b[2] >= a[2]))
+}
+
+/** 四组读法合并成 (Σα, Σm, P)：shanten = 8 - min(Σα + 2·naki, Σm + naki + 4 + P) */
+export function normalShanten(counts: Counts, naki: number): number {
+  let states: Reading[] = [[0, 0, 0]]
+  const groups: Reading[][] = [
+    readingsOf(counts.man), readingsOf(counts.so), readingsOf(counts.pin), [honorsReading(counts)],
+  ]
+  for (const group of groups) {
+    const next: Reading[] = []
+    for (const s of states) {
+      for (const x of group) {
+        next.push([s[0] + 2 * x[0] + x[1], s[1] + x[0], Math.max(s[2], x[2])])
+      }
+    }
+    states = paretoStates(next)
+  }
+  let best = Infinity
+  for (const [alpha, m, p] of states) {
+    best = Math.min(best, 8 - Math.min(alpha + 2 * naki, m + naki + 4 + p))
+  }
+  return best
+}
+
+/** 4 面子 + 将：枚举将，剩下的每组查和了表 */
+export function isAgari(counts: Counts): boolean {
+  for (const suit of SUITS) {
+    const tiles = counts[suit]
+    for (let r = 0; r < tiles.length; r++) {
+      if (tiles[r] < 2) continue
+      tiles[r] -= 2
+      const ok = splittable(counts.man) && splittable(counts.so) && splittable(counts.pin)
+        && [...counts.kaze, ...counts.sangen].every(n => n % 3 === 0)
+      tiles[r] += 2
+      if (ok) return true
+    }
+  }
+  return false
+}
+
+/** 听牌张；不是听牌的手牌返回空数组（手里攥着 4 张的那种"0 张听牌"也是空数组） */
+export function waits(counts: Counts): TileKind[] {
+  const result: TileKind[] = []
+  for (const suit of SUITS) {
+    const tiles = counts[suit]
+    for (let r = 0; r < tiles.length; r++) {
+      if (tiles[r] >= 4) continue          // 手里已经 4 张，不会有第 5 张
+      tiles[r]++
+      if (isAgari(counts)) result.push({ suit, rank: r + 1 })
+      tiles[r]--
+    }
+  }
+  return sortTileKinds(result)
+}
 
 export function shanten(counts: Counts, naki: number): [number, TileKind[]] {
   const candidates: [number, TileKind[]][] = []
@@ -11,7 +113,8 @@ export function shanten(counts: Counts, naki: number): [number, TileKind[]] {
     candidates.push(kokushiMusouShanten(counts))
   }
   const normal = normalShanten(counts, naki)
-  candidates.push([normal[0], normal[1].map(x => x[0])])
+  // 非听牌手牌返回空（旧实现返回的是"进张"，语义含糊）
+  candidates.push([normal, normal === 0 ? waits(counts) : []])
   const result = candidates.reduce((acc, x) => {
     if (acc[0] < x[0]) return acc
     if (acc[0] > x[0]) return x
@@ -75,87 +178,67 @@ export function kokushiMusouShanten(counts: Counts): [shanten: number, shantenTi
   return [shanten, uniqTileKinds(shantenTileKinds)]
 }
 
-export function normalShanten(counts: Counts, naki: number): [shanten: number, waitDecompositions: [TileKind, Decomposed[]][]] {
+/**
+ * 每个听牌张 → 能由它补成和牌的拆分（和牌判役/符用）。
+ * 拆分是【13 张】的形态：待ち型要靠"和牌张落在哪个块里"才看得出来，所以先还原再交给 yaku。
+ */
+export function waitSplits(counts: Counts): [TileKind, Decomposed[]][] {
   const result: [TileKind, Decomposed[]][] = []
-  const [shanten, decomposed] = minShanten(decompose(counts), naki)
-  for (const dec of decomposed) {
-    function add(tileKind: TileKind) {
-      const element = result.find(element => compareTileKind(element[0], tileKind) === 0)
-      if (!element) {
-        result.push([tileKind, [dec]])
-      } else {
-        element[1].push(dec)
+  for (const wait of waits(counts)) {
+    counts[wait.suit][wait.rank - 1]++
+    const splits = split(counts)
+    counts[wait.suit][wait.rank - 1]--
+    const decs = new Map<string, Decomposed>()
+    for (const dec of splits) {
+      for (const uncompleted of uncomplete(dec, wait)) {
+        decs.set(splitKey(uncompleted), uncompleted)
       }
     }
-
-    const {
-      shuntsu, kotsu, toitsu,
-      ryammen, penchan, kanchan,
-    } = dec.blocks.reduce((acc, x) => {
-      acc[x.type].push(x)
-      return acc
-    }, {
-      shuntsu: [], kotsu: [], toitsu: [],
-      ryammen: [], penchan: [], kanchan: [],
-    } as Record<BlockType, Block[]>)
-    const mentsuLength = shuntsu.length + kotsu.length
-    const tatsuLength = ryammen.length + penchan.length + kanchan.length
-
-    for (const rm of ryammen) {
-      add({ suit: rm.suit, rank: rm.tiles[0] - 1 })
-      add({ suit: rm.suit, rank: rm.tiles[1] + 1 })
-    }
-    for (const pc of penchan) {
-      const rank = pc.tiles[0] === 1 ? pc.tiles[1] + 1 : pc.tiles[0] - 1
-      add({ suit: pc.suit, rank })
-    }
-    for (const kc of kanchan) {
-      add({ suit: kc.suit, rank: kc.tiles[0] + 1 })
-    }
-    // 分没有对子、一个对子和多个对子三种情况
-    function makeTatsu() {
-      for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
-        for (let i = 0; i < dec.rest[suit].length; i++) {
-          if (dec.rest[suit][i] === 0) continue
-          if (i - 2 < 0 || i + 2 > 8) continue
-          for (const tile of [i - 2, i - 1, i, i + 1, i + 2]) {
-            add({ suit, rank: tile + 1 })
-          }
-        }
-      }
-      for (const suit of ['kaze', 'sangen'] satisfies Suit[]) {
-        for (let i = 0; i < dec.rest[suit].length; i++) {
-          if (dec.rest[suit][i] === 0) continue
-          add({ suit, rank: i + 1 })
-        }
-      }
-    }
-    if (toitsu.length === 0) {
-      if (mentsuLength + naki + tatsuLength < 4)  {
-        makeTatsu()
-      } else {
-        // 将单张做成对子
-        for (const [suit, tiles] of Object.entries(dec.rest)) {
-          for (let i = 0; i < tiles.length; i++) {
-            if (tiles[i] === 0) continue
-            add({ suit: suit as Suit, rank: i + 1 })
-          }
-        }
-      }
-    }
-    if ((toitsu.length === 1 && mentsuLength + naki + tatsuLength < 4)
-      || (toitsu.length >= 2 && mentsuLength + naki + tatsuLength < 5)) {
-      makeTatsu()
-      // 将对子做成刻子
-      for (const tt of toitsu) {
-        add({
-          suit: tt.suit,
-          rank: tt.tiles[0],
-        })
-      }
-    }
+    if (decs.size !== 0) result.push([wait, [...decs.values()]])
   }
-  return [shanten, result]
+  return result
+}
+
+/** 同一张牌可能落在多个块里（1111m23m 的 1m），每种都要产出候选 */
+function uncomplete(decomposition: Decomposed, wait: TileKind): Decomposed[] {
+  const result: Decomposed[] = []
+  for (let index = 0; index < decomposition.blocks.length; index++) {
+    const block = decomposition.blocks[index]
+    if (block.suit !== wait.suit || !block.tiles.includes(wait.rank)) continue
+    const blocks = [...decomposition.blocks]
+    const rest = cloneCounts(decomposition.rest)
+    if (block.type === 'toitsu') {
+      blocks.splice(index, 1)
+      rest[block.suit][wait.rank - 1] += 1
+    } else if (block.type === 'kotsu') {
+      blocks[index] = { type: 'toitsu', suit: block.suit, tiles: [wait.rank, wait.rank] }
+    } else {
+      // 边张只有 (1,2) 和 (8,9) 两种，其余是两面
+      const [low, middle] = block.tiles
+      const type: BlockType = wait.rank === middle ? 'kanchan'
+        : wait.rank === low ? (low === 7 ? 'penchan' : 'ryammen')
+          : (low === 1 ? 'penchan' : 'ryammen')
+      blocks[index] = {
+        type,
+        suit: block.suit,
+        tiles: block.tiles.filter(rank => rank !== wait.rank),
+      }
+    }
+    result.push(new Decomposed(blocks, rest))
+  }
+  return result
+}
+
+/** 拆分的规范化字符串（去重用） */
+function splitKey(decomposition: Decomposed): string {
+  const blocks = decomposition.blocks
+    .map(block => `${block.type}:${block.suit}${block.tiles.join(',')}`)
+    .sort()
+    .join(' ')
+  const rest = Object.entries(decomposition.rest)
+    .map(([suit, tiles]) => `${suit}${tiles.join(',')}`)
+    .join('')
+  return `${blocks}/${rest}`
 }
 
 export type BlockType = 'shuntsu' | 'kotsu' | 'toitsu' | 'ryammen' | 'penchan' | 'kanchan'
@@ -175,360 +258,64 @@ export class Decomposed {
   }
 }
 
-// 数牌
-export class NumberDecomposed {
-  constructor(
-    public blocks: Block[],
-    public rest: number[],
-  ) {
-    sortBlocks(blocks)
+function splitMentsu(tiles: number[], suit: Suit, i = 0, acc: Block[] = []): Block[][] {
+  while (i < 9 && tiles[i] === 0) i++
+  if (i === 9) return [acc]
+  const result: Block[][] = []
+  if (tiles[i] >= 3) {
+    tiles[i] -= 3
+    result.push(...splitMentsu(tiles, suit, i, [...acc, { type: 'kotsu', suit, tiles: [i + 1, i + 1, i + 1] }]))
+    tiles[i] += 3
   }
-}
-
-export function decompose(counts: Counts): Decomposed[] {
-  const [blocks, isolated, rest] = isolate(counts)
-  const decomposed = jantou(rest)
-  const result = new DecomposedSet()
-  for (const dec of decomposed.values()) {
-    result.add(new Decomposed(
-      [...blocks, ...dec.blocks],
-      addCounts(isolated, dec.rest),
-    ))
+  // 刻子和顺子都要试：1111m23m 要拆成 111m + 123m（共用同一张 1m）
+  if (i + 2 < 9 && tiles[i] >= 1 && tiles[i + 1] >= 1 && tiles[i + 2] >= 1) {
+    tiles[i]--; tiles[i + 1]--; tiles[i + 2]--
+    result.push(...splitMentsu(tiles, suit, i, [...acc, { type: 'shuntsu', suit, tiles: [i + 1, i + 2, i + 3] }]))
+    tiles[i]++; tiles[i + 1]++; tiles[i + 2]++
   }
-  return result.values()
-}
-
-function isolate(counts: Counts): [
-  blocks: Block[],
-  isolated: Counts,
-  rest: Counts,
-] {
-  counts = cloneCounts(counts)
-  const isolated = createEmptyCounts()
-  const blocks: Block[] = []
-  for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
-    const tiles = counts[suit]
-    for (let i = 0; i < tiles.length; i++) {
-      if (tiles[i] >= 3) {
-        let iso = true
-        for (const j of [i - 2, i - 1, i + 1, i + 2]) {
-          if (j < 0 || j > 8) continue
-          if (tiles[j] > 0) {
-            iso = false
-            break
-          }
-        }
-        if (iso) {
-          tiles[i] -= 3
-          blocks.push({
-            type: 'kotsu',
-            suit,
-            tiles: [i + 1, i + 1, i + 1],
-          })
-        }
-      }
-      if (tiles[i] === 1 && tiles[i + 1] === 1 && tiles[i + 2] === 1) {
-        let iso = true
-        for (const j of [i - 2, i - 1, i + 3, i + 4]) {
-          if (j < 0 || j > 8) continue
-          if (tiles[j] > 0) {
-            iso = false
-            break
-          }
-        }
-        if (iso) {
-          tiles[i]--
-          tiles[i + 1]--
-          tiles[i + 2]--
-          blocks.push({
-            type: 'shuntsu',
-            suit,
-            tiles: [i + 1, i + 2, i + 3],
-          })
-        }
-      }
-      if (tiles[i] === 1) {
-        let iso = true
-        for (const j of [i - 2, i - 1, i + 1, i + 2]) {
-          if (j < 0 || j > 8) continue
-          if (tiles[j] > 0) {
-            iso = false
-            break
-          }
-        }
-        if (iso) {
-          tiles[i]--
-          isolated[suit][i]++
-        }
-      }
-    }
-  }
-  for (const suit of ['kaze', 'sangen'] satisfies Suit[]) {
-    const tiles = counts[suit]
-    for (let i = 0; i < tiles.length; i++) {
-      if (tiles[i] >= 3) {
-        tiles[i] -= 3
-        blocks.push({
-          type: 'kotsu',
-          suit,
-          tiles: [i + 1, i + 1, i + 1],
-        })
-      }
-      if (tiles[i] === 1) {
-        tiles[i]--
-        isolated[suit][i]++
-      }
-    }
-  }
-  return [blocks, isolated, counts]
-}
-
-// 雀头：对子的分解
-function jantou(counts: Counts) {
-  counts = cloneCounts(counts)
-  const results = new DecomposedSet()
-  for (const [suit, tiles] of Object.entries(counts)) {
-    for (let i = 0; i < tiles.length; i++) {
-      if (tiles[i] < 2) continue
-      const cloned = cloneCounts(counts)
-      cloned[suit][i] -= 2
-      for (const { blocks, rest } of mentsu(cloned).values()) {
-        results.add(new Decomposed(
-          blocks.concat({
-            type: 'toitsu',
-            suit: suit as Suit,
-            tiles: [i + 1, i + 1],
-          }),
-          rest,
-        ))
-      }
-    }
-  }
-  results.addSet(mentsu(counts))
-  return results
-}
-
-function mentsu(counts: Counts): DecomposedSet {
-  counts = cloneCounts(counts)
-  const results: NumberDecomposedSet[] = []
-  for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
-    const result = new NumberDecomposedSet()
-    const tiles = counts[suit]
-    for (const { blocks: b1, rest } of [...kotsu(tiles, suit).values(), ...shuntsu(tiles, suit).values()]) {
-      for (const { blocks: b2, rest: r2 } of tatsu(rest, suit, Math.max(0, 4 - b1.length)).values()) {
-        result.add(new NumberDecomposed([...b1, ...b2], r2))
-      }
-    }
-    results.push(result)
-  }
-  const suitDecompositions = cartesian(...results.map(result => result.values()))
-
-  // 字牌
-  const tsuhai: Block[] = []
-  for (const suit of ['kaze', 'sangen'] satisfies Suit[]) {
-    const tiles = counts[suit]
-    for (let i = 0; i < tiles.length; i++) {
-      if (tiles[i] >= 2) {
-        tiles[i] -= 2
-        tsuhai.push({
-          type: 'toitsu',
-          suit,
-          tiles: [i + 1, i + 1],
-        })
-      }
-    }
-  }
-
-  const result = new DecomposedSet()
-  suitDecompositions.forEach(suitDecompositions => {
-    result.add(new Decomposed(
-      [...suitDecompositions[0].blocks, ...suitDecompositions[1].blocks, ...suitDecompositions[2].blocks, ...tsuhai],
-      {
-        'man': suitDecompositions[0].rest,
-        'so': suitDecompositions[1].rest,
-        'pin': suitDecompositions[2].rest,
-        'kaze': counts['kaze'],
-        'sangen': counts['sangen'],
-      },
-    ))
-  })
   return result
 }
 
-function kotsu(tiles: number[], suit: Suit): NumberDecomposedSet {
-  const results = new NumberDecomposedSet()
-  let empty = true
-  for (let i = 0; i < tiles.length; i++) {
-    if (tiles[i] < 3) continue
-    empty = false
-    const cloned = [...tiles]
-    cloned[i] -= 3
-    for (const { blocks, rest } of [...kotsu(cloned, suit).values(), ...shuntsu(cloned, suit).values()]) {
-      results.add(new NumberDecomposed(
-        blocks.concat({
-          type: 'kotsu',
-          suit,
-          tiles: [i + 1, i + 1, i + 1],
-        }),
-        rest,
-      ))
+function splitHonors(counts: Counts): Block[][] {
+  const blocks: Block[] = []
+  for (const suit of ['kaze', 'sangen'] satisfies Suit[]) {
+    const tiles = counts[suit]
+    for (let r = 0; r < tiles.length; r++) {
+      if (tiles[r] === 0) continue
+      if (tiles[r] !== 3) return []
+      blocks.push({ type: 'kotsu', suit, tiles: [r + 1, r + 1, r + 1] })
     }
   }
-  if (empty) {
-    results.add(new NumberDecomposed([], tiles))
-  }
-  return results
+  return [blocks]
 }
 
-function shuntsu(tiles: number[], suit: Suit): NumberDecomposedSet {
-  const results = new NumberDecomposedSet()
-  let empty = true
-  for (let i = 0; i < tiles.length; i++) {
-    if (i + 2 > 8 || tiles[i] < 1 || tiles[i + 1] < 1 || tiles[i + 2] < 1) continue
-    empty = false
-    const cloned = [...tiles]
-    cloned[i]--
-    cloned[i + 1]--
-    cloned[i + 2]--
-    for (const { blocks, rest } of [...kotsu(cloned, suit).values(), ...shuntsu(cloned, suit).values()]) {
-      results.add(new NumberDecomposed(
-        blocks.concat({
-          type: 'shuntsu',
-          suit,
-          tiles: [i + 1, i + 2, i + 3],
-        }),
-        rest,
-      ))
+/**
+ * 和牌拆分（4 面子 + 1 将）：枚举将，剩下的每组先用和了表判能不能整拆，能拆的才展开成块。
+ * 不是和牌形的牌返回空数组。
+ */
+export function split(counts: Counts): Decomposed[] {
+  const result = new Map<string, Decomposed>()
+  for (const suit of SUITS) {
+    const tiles = counts[suit]
+    for (let r = 0; r < tiles.length; r++) {
+      if (tiles[r] < 2) continue
+      tiles[r] -= 2                                       // 拿走这一对当将
+      const whole = splittable(counts.man) && splittable(counts.so) && splittable(counts.pin)
+        && [...counts.kaze, ...counts.sangen].every(n => n % 3 === 0)
+      if (whole) {
+        const pair: Block = { type: 'toitsu', suit, tiles: [r + 1, r + 1] }
+        for (const combo of cartesian(
+          splitMentsu([...counts.man], 'man'),
+          splitMentsu([...counts.so], 'so'),
+          splitMentsu([...counts.pin], 'pin'),
+          splitHonors(counts),
+        )) {
+          const decomposition = new Decomposed([...combo.flat(), pair], createEmptyCounts())
+          result.set(splitKey(decomposition), decomposition)
+        }
+      }
+      tiles[r] += 2
     }
   }
-  if (empty) {
-    results.add(new NumberDecomposed([], tiles))
-  }
-  return results
-}
-
-function tatsu(tiles: number[], suit: Suit, slots: number): NumberDecomposedSet {
-  const set = new NumberDecomposedSet()
-  set.addSet(toitsu(tiles, suit, slots))
-  set.addSet(ryammen(tiles, suit, slots))
-  set.addSet(kanchan(tiles, suit, slots))
-  return set
-}
-
-function toitsu(tiles: number[], suit: Suit, slots: number): NumberDecomposedSet {
-  const results = new NumberDecomposedSet()
-  if (slots === 0) {
-    results.add(new NumberDecomposed([], tiles))
-    return results
-  }
-  let empty = true
-  for (let i = 0; i < tiles.length; i++) {
-    if (tiles[i] < 2) continue
-    empty = false
-    const cloned = [...tiles]
-    cloned[i] -= 2
-    for (const { blocks, rest } of tatsu(cloned, suit, slots - 1).values()) {
-      results.add(new NumberDecomposed(
-        blocks.concat({
-          type: 'toitsu',
-          suit,
-          tiles: [i + 1, i + 1],
-        }),
-        rest,
-      ))
-    }
-  }
-  if (empty) {
-    results.add(new NumberDecomposed([], tiles))
-  }
-  return results
-}
-
-function ryammen(tiles: number[], suit: Suit, slots: number): NumberDecomposedSet {
-  const results = new NumberDecomposedSet()
-  if (slots === 0) {
-    results.add(new NumberDecomposed([], tiles))
-    return results
-  }
-  let empty = true
-  for (let i = 0; i < tiles.length; i++) {
-    if (i + 1 > 8 || tiles[i] < 1 || tiles[i + 1] < 1) continue
-    empty = false
-    const cloned = [...tiles]
-    cloned[i]--
-    cloned[i + 1]--
-    for (const { blocks, rest } of tatsu(cloned, suit, slots - 1).values()) {
-      results.add(new NumberDecomposed(
-        blocks.concat({
-          type: i === 0 || i === 7 ? 'penchan' : 'ryammen',
-          suit,
-          tiles: [i + 1, i + 2],
-        }),
-        rest,
-      ))
-    }
-  }
-  if (empty) {
-    results.add(new NumberDecomposed([], tiles))
-  }
-  return results
-}
-
-function kanchan(tiles: number[], suit: Suit, slots: number): NumberDecomposedSet {
-  const results = new NumberDecomposedSet()
-  if (slots === 0) {
-    results.add(new NumberDecomposed([], tiles))
-    return results
-  }
-  let empty = true
-  for (let i = 0; i < tiles.length; i++) {
-    if (i + 2 > 8 || tiles[i] < 1 || tiles[i + 2] < 1) continue
-    empty = false
-    const cloned = [...tiles]
-    cloned[i]--
-    cloned[i + 2]--
-    for (const { blocks, rest } of tatsu(cloned, suit, slots - 1).values()) {
-      results.add(new NumberDecomposed(
-        blocks.concat({
-          type: 'kanchan',
-          suit,
-          tiles: [i + 1, i + 3],
-        }),
-        rest,
-      ))
-    }
-  }
-  if (empty) {
-    results.add(new NumberDecomposed([], tiles))
-  }
-  return results
-}
-
-// naki: 鸣牌
-export function minShanten(decomposed: Decomposed[], naki: number): [shanten: number, decomposed: Decomposed[]] {
-  return decomposed.reduce(([min, list], x, i) => {
-    const count = {
-      kotsu: 0,
-      shuntsu: 0,
-      ryammen: 0,
-      penchan: 0,
-      kanchan: 0,
-      toitsu: 0,
-    }
-    for (const block of x.blocks) {
-      count[block.type]++
-    }
-    let mentsu = count.kotsu + count.shuntsu + naki
-    let tatsuBlocks = count.ryammen + count.penchan + count.kanchan + count.toitsu
-    let usableTatsu = mentsu + tatsuBlocks > 4 ? 4 - mentsu : tatsuBlocks
-    let hasToitsu = (mentsu + tatsuBlocks) > 4 && count.toitsu > 0
-    let shanten = 8 - mentsu * 2 - usableTatsu - (hasToitsu ? 1 : 0)
-    if (shanten < min) {
-      return [shanten, [x]]
-    } else if (shanten === min) {
-      return [min, list.concat(x)]
-    } else {
-      return [min, list]
-    }
-  }, [Infinity, []] as [number, Decomposed[]])
+  return [...result.values()]
 }
