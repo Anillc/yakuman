@@ -187,6 +187,10 @@ export class Mahjong {
   riichibo = 0
   // 最近一次结束的结果，nextRound() 靠它决定连庄/进局
   lastEnd: MahjongEnd
+  // 多家荣和的规则：
+  //   false = 頭ハネ（默认）：只有离放铳者最近的那家和牌，其他家不算和
+  //   true  = 每家和牌者都收（天鳳・雀魂风格；本場棒/立直棒仍然只给最近的赢家）
+  multipleRon = false
 
   constructor(
     // 轮到某一家操作时回调：ctxs 是该家（或其余几家）可做的操作，cancel 在全部跳过之后调用
@@ -195,7 +199,10 @@ export class Mahjong {
     public roundEnd: (end: MahjongEnd) => void,
     // 可选：自定义牌山生成（庄家座位、第几局、本场棒），用于测试或复盘
     public createTiles?: (dealerId: PlayerId, kyoku: number, homba: number) => Tile[],
+    // 可选：规则开关（目前只有多家荣和）
+    options?: { multipleRon?: boolean },
   ) {
+    if (options?.multipleRon !== undefined) this.multipleRon = options.multipleRon
     this.createRound()
   }
 
@@ -263,6 +270,10 @@ export class Mahjong {
     let closestWinner = this.round.kiru.from.playerId
     while (!ctxs.find(ctx => ctx.player.id === closestWinner)) {
       closestWinner = nextId(closestWinner)
+    }
+    // 頭ハネ：只有最近的那家算和
+    if (!this.multipleRon && ctxs.length > 1) {
+      ctxs = [ctxs.find(ctx => ctx.player.id === closestWinner)]
     }
     const furikomi = this.round.kiru.from.playerId
     const horaList: MahjongEnd['hora'] = []
