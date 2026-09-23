@@ -159,6 +159,20 @@ export class MahjongEnd {
   }
 }
 
+// 一家的决策：交给 playDecisions 执行（库负责荣和优先、多家荣和、座位顺序、全跳过才继续摸牌）
+export type Decision =
+  | { action: 'ron' }
+  | { action: 'tsumo' }
+  | { action: 'tedashi', tile: Tile, riichi?: boolean }
+  | { action: 'tsumogiri', riichi?: boolean }
+  | { action: 'chi', candidate: Tile[] }
+  | { action: 'pon', candidate: Tile[] }
+  | { action: 'minkan', candidate: Tile[] }
+  | { action: 'ankan', candidate: Tile[] }
+  | { action: 'chakan', candidate: Tile }
+  | { action: 'ryuukyoku' }
+  | { action: 'pass' }
+
 export class Mahjong {
   round: Round
   // 场风（东场 -> 南场 -> 西场）
@@ -187,6 +201,41 @@ export class Mahjong {
 
   start() {
     this.next()
+  }
+
+  // 用"每家的决策回调"驱动整局：调用方只回答这一家做什么，其余交给库：
+  // 1) 荣和优先（可多家同时荣和）；2) 碰、明杠优先于吃；3) 其余按玩家编号顺序；
+  // 4) 全都 pass 才继续摸牌（等价于调用 cancel）。
+  // 注意：同一家在一次询问里可能被问两次（先问荣和，再问吃碰杠）。
+  playDecisions(choose: (ctx: MahjongContext) => Decision | undefined) {
+    this.callback = (ctxs, cancel) => {
+      const list = playerIds.map(id => ctxs[id]).filter((ctx): ctx is MahjongContext => ctx !== undefined)
+      // 1) 荣和优先，可多家
+      const ronners = list.filter(ctx => ctx.types.has('ron') && choose(ctx)?.action === 'ron')
+      if (ronners.length !== 0) {
+        this.ron(ronners)
+        return
+      }
+      // 2) 碰 / 杠 优先于吃（吃只有下家能吃，已经由 Round.action 保证）；都没有时按座位顺序处理自己的回合
+      const strong = list.filter(ctx => ctx.types.has('pon') || ctx.types.has('kan'))
+      const weak = list.filter(ctx => ctx.types.has('chi') && !ctx.types.has('pon') && !ctx.types.has('kan'))
+      for (const ctx of strong.length + weak.length !== 0 ? [...strong, ...weak] : list) {
+        const decision = choose(ctx)
+        if (!decision || decision.action === 'pass' || decision.action === 'ron') continue
+        switch (decision.action) {
+          case 'tsumo': this.tsumo(ctx); return
+          case 'tedashi': ctx.tedashi(decision.tile, decision.riichi); return
+          case 'tsumogiri': ctx.tsumogiri(decision.riichi); return
+          case 'chi': ctx.chi(decision.candidate); return
+          case 'pon': ctx.pon(decision.candidate); return
+          case 'minkan': ctx.minkan(decision.candidate); return
+          case 'ankan': ctx.ankan(decision.candidate); return
+          case 'chakan': ctx.chakan(decision.candidate); return
+          case 'ryuukyoku': ctx.ryuukyoku(); return
+        }
+      }
+      cancel()
+    }
   }
 
   // 全体跳过（都不吃、碰、杠、和）后的处理：生成传给 callback 的 cancel 回调。
