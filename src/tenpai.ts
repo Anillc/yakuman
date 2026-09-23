@@ -1,8 +1,8 @@
-import { Suit } from './round'
+import { Suit } from './round.js'
 import {
   Counts, DecomposedSet, NumberDecomposedSet, TileKind, addCounts,
   cartesian, cloneCounts, compareTileKind, createEmptyCounts, sortBlocks, uniqTileKinds,
-} from './utils'
+} from './utils.js'
 
 export function shanten(counts: Counts, naki: number): [number, TileKind[]] {
   const candidates: [number, TileKind[]][] = []

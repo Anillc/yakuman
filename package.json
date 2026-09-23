@@ -1,14 +1,33 @@
 {
   "name": "yakuman",
   "version": "1.0.0",
+  "type": "module",
+  "packageManager": "yarn@4.12.0",
   "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib"
+  ],
   "repository": "https://github.com/Anillc/yakuman.git",
   "author": "Anillc <void@anillc.cn>",
   "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "tui": "tsx examples/tui.ts"
+  },
   "devDependencies": {
+    "@types/blessed": "^0.1.27",
     "@types/lodash.uniqwith": "^4.5.7",
     "@types/node": "^18.16.3",
-    "ts-node": "^10.9.1",
+    "blessed": "^0.1.81",
+    "commander": "^15",
+    "tsx": "^4.23.15",
     "typescript": "^5.0.4"
   },
   "dependencies": {

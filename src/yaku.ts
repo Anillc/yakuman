@@ -1,6 +1,6 @@
-import { Player, Round, Tile, Suit, kazes, sangens } from './round'
-import { Block, Decomposed, chiitoitsuShanten, decompose, kokushiMusouShanten, minShanten, normalShanten } from './tenpai'
-import { MahjongError, TileKind, arrayEquals, compareTileKind, group } from './utils'
+import { Player, Round, Tile, Suit, kazes, sangens } from './round.js'
+import { Block, Decomposed, chiitoitsuShanten, decompose, kokushiMusouShanten, minShanten, normalShanten } from './tenpai.js'
+import { MahjongError, TileKind, arrayEquals, compareTileKind, group } from './utils.js'
 
 // 和牌判定的结果：役（含符与番）与基本点
 // 基本点还没乘庄家/闲家倍数、也没算供托，收多少分请见 MahjongEnd

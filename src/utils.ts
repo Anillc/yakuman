@@ -1,5 +1,5 @@
-import { Kaze, PlayerId, Tile, Suit, suits } from './round'
-import { Block, Decomposed, NumberDecomposed, blockTypes } from './tenpai'
+import { Kaze, PlayerId, Tile, Suit, suits } from './round.js'
+import { Block, Decomposed, NumberDecomposed, blockTypes } from './tenpai.js'
 import uniqWith from 'lodash.uniqwith'
 
 // 库抛出的错误都带一个稳定的 code（ASCII），调用方按 code 判断；message 只给人看。

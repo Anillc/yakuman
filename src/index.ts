@@ -1,11 +1,11 @@
-import { Action, ActionType, Kan, Kaze, Player, PlayerId, Round, Tile, playerIds } from './round'
-import { MahjongError, TileKind, nextId, shimocha } from './utils'
-import { HoraResult } from './yaku'
+import { Action, ActionType, Kan, Kaze, Player, PlayerId, Round, Tile, playerIds } from './round.js'
+import { MahjongError, TileKind, nextId, shimocha } from './utils.js'
+import { HoraResult } from './yaku.js'
 
-export * from './round'
-export * from './tenpai'
-export * from './utils'
-export * from './yaku'
+export * from './round.js'
+export * from './tenpai.js'
+export * from './utils.js'
+export * from './yaku.js'
 
 // 规则补充（调用方会碰到的）：
 // - 食い替え禁止：刚鸣的那张（吃的话还有同筋的另一端）不能马上打，挂在 ctx.kuikae 上

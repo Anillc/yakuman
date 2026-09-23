@@ -1,6 +1,6 @@
-import { Decomposed, decompose, shanten } from './tenpai'
-import { MahjongError, TileKind, compareTileKind, createEmptyCounts, group, nextId, shimocha, shuffle, toMPSZ, toTileKinds, uniqTileKinds } from './utils'
-import { HoraResult, canHora, yaku } from './yaku'
+import { Decomposed, decompose, shanten } from './tenpai.js'
+import { MahjongError, TileKind, compareTileKind, createEmptyCounts, group, nextId, shimocha, shuffle, toMPSZ, toTileKinds, uniqTileKinds } from './utils.js'
+import { HoraResult, canHora, yaku } from './yaku.js'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 export const kazes: Kaze[] = ['ton', 'nan', 'sha', 'pei']
