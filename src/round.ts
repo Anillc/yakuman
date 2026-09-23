@@ -201,6 +201,7 @@ export class Round {
     // 摸切 = 打出的就是刚摸到的那张（吃碰之后的打牌算手切）
     tile.tsumogiri = !this.kiru && index === this.player.tiles.length - 1
     this.player.tiles.splice(index, 1)
+    tile.playerId = this.currentId            // 打出去之后，"这张牌来自谁"就是打牌的那一家
     this.kiru = tile
     this.player.discards.push(tile)
     this.player.discardCounts[tile.suit][tile.rank - 1]++
@@ -653,34 +654,53 @@ export class Player {
       return []
     }
     const chizai: Tile[][] = []
+    // 手里有多张同样的牌时，用来吃的那两张会有多种拿法，但拿哪张都一样：
+    // 按"用掉的牌"（同种同红算同一种）去重，免得列出一堆一模一样的"吃"
+    const seen = new Set<string>()
+    const push = (first: Tile, second: Tile) => {
+      const key = [first, second]
+        .map(tile => `${tile.suit}${tile.rank}${tile.red ? 'r' : ''}`)
+        .sort()
+        .join(',')
+      if (seen.has(key)) return
+      seen.add(key)
+      chizai.push([first, second])
+    }
     // 45<6>
     if (current.rank - 2 >= 1) {
       const first = this.tiles.filter((tile) => tile.equals(current.suit, current.rank - 2))
       const second = this.tiles.filter((tile) => tile.equals(current.suit, current.rank - 1))
-      first.forEach((first) => second.forEach((second) => chizai.push([first, second])))
+      first.forEach((first) => second.forEach((second) => push(first, second)))
     }
     // 4<5>6
     if (current.rank - 1 >=1 && current.rank + 1 <= 9) {
       const first = this.tiles.filter((tile) => tile.equals(current.suit, current.rank - 1))
       const third = this.tiles.filter((tile) => tile.equals(current.suit, current.rank + 1))
-      first.forEach((first) => third.forEach((third) => chizai.push([first, third])))
+      first.forEach((first) => third.forEach((third) => push(first, third)))
     }
     // <4>56
     if (current.rank + 2 <= 9) {
       const second = this.tiles.filter((tile) => tile.equals(current.suit, current.rank + 1))
       const third = this.tiles.filter((tile) => tile.equals(current.suit, current.rank + 2))
-      second.forEach((second) => third.forEach((third) => chizai.push([second, third])))
+      second.forEach((second) => third.forEach((third) => push(second, third)))
     }
     return chizai
   }
   get ponTiles() {
     const current = this.round.kiru
-    const ponzai: Tile[][] = []
     const same = this.tiles.filter((tile) => tile.equals(current))
-    if (same.length === 2) {
-      ponzai.push(same)
-    } else if (same.length === 3) {
-      ponzai.push([same[0], same[1]], [same[0], same[2]], [same[1], same[2]])
+    const ponzai: Tile[][] = []
+    // 手里 3 张同牌时 C(3,2) 种拿法只差"留下哪张"：留牌同种同红的算同一个选择
+    // （三张一模一样的字牌就只剩一种），否则会列出一堆看起来完全一样的"碰"
+    const seen = new Set<string>()
+    for (let i = 0; i < same.length; i++) {
+      for (let j = i + 1; j < same.length; j++) {
+        const kept = same.filter((_, k) => k !== i && k !== j)
+        const key = kept.map((tile) => tile.red ? 'r' : '-').join('')
+        if (seen.has(key)) continue
+        seen.add(key)
+        ponzai.push([same[i], same[j]])
+      }
     }
     return ponzai
   }

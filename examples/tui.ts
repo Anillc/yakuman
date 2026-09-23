@@ -85,11 +85,16 @@ function tile(t: Tile | { suit: string, rank: number }): string {
   return label
 }
 
-function melds(player: { chi: Tile[][], pon: { tiles: Tile[] }[], minkan: Tile[][], ankan: Tile[][] }): string {
+function melds(player: { id: PlayerId, chi: Tile[][], pon: { tiles: Tile[] }[], minkan: Tile[][], ankan: Tile[][] }): string {
+  // 被鸣的那张是别家打出来的（playerId 不是自己）→ 标上是哪一家打的
+  const from = (tiles: Tile[]) => {
+    const called = tiles.find(tile => tile.playerId !== undefined && tile.playerId !== player.id)
+    return called === undefined ? '' : `(${called.playerId})`
+  }
   const groups = [
-    ...player.chi.map(tiles => `吃${toMPSZ(tiles)}`),
-    ...player.pon.map(pon => `碰${toMPSZ(pon.tiles)}`),
-    ...player.minkan.map(tiles => `明杠${toMPSZ(tiles)}`),
+    ...player.chi.map(tiles => `吃${toMPSZ(tiles)}${from(tiles)}`),
+    ...player.pon.map(pon => `碰${toMPSZ(pon.tiles)}${from(pon.tiles)}`),
+    ...player.minkan.map(tiles => `明杠${toMPSZ(tiles)}${from(tiles)}`),
     ...player.ankan.map(tiles => `暗杠${toMPSZ(tiles)}`),
   ]
   return groups.length === 0 ? '-' : groups.join(' ')
@@ -160,9 +165,13 @@ function seatInfo(id: PlayerId, asking: boolean) {
 
 function riverOf(id: PlayerId, limit: number) {
   const discards = mahjong.round.players[id].discards
-  const shown = discards.slice(-limit).map(t => (t.riichi
-    ? `{yellow-fg}${toMPSZ([t])}{/yellow-fg}`
-    : toMPSZ([t])))
+  // 黄的 = 立直宣言牌，灰的 = 摸切（牌河的颜色含义写在下面的按键提示里）
+  const shown = discards.slice(-limit).map(t => {
+    const text = toMPSZ([t])
+    if (t.riichi) return `{yellow-fg}${text}{/yellow-fg}`
+    if (t.tsumogiri) return `{gray-fg}${text}{/gray-fg}`
+    return text
+  })
   return shown.length === 0 ? '-' : shown.join(' ')
 }
 
@@ -368,7 +377,7 @@ function draw(slot?: PromptSlot) {
   const tableWidth = Math.max(40, Math.min(columns, Math.round(columns * 0.8)))
   const tableHeight = Math.max(9, Math.min(rows - 5, Math.round(rows * 0.8)))
   const table = renderBoard(tableWidth, tableHeight, slot).lines()
-  const keys = '{gray-fg}←/→ 选牌 · Enter 打出 · m 摸切 · r 立直 · t 自摸 · o 荣和 · 1-9 选候选 · q 跳过 · Q 退出{/gray-fg}'
+  const keys = '{gray-fg}牌河：灰=摸切 黄=立直宣言牌 · ←/→ 选牌 · Enter 打出 · m 摸切 · r 立直 · t 自摸 · o 荣和 · 1-9 选候选 · q 跳过 · Q 退出{/gray-fg}'
   const footer = [
     ...renderHand(),
     keys,
@@ -392,6 +401,15 @@ function draw(slot?: PromptSlot) {
 }
 
 // 这一格能做什么
+// 吃/碰/明杠的候选：提示里的编号和按键都走这一份列表，免得各自从 1 开始数、按同一个键撞车
+function claimCandidates(ctx: MahjongContext) {
+  const list: { label: string, decision: Decision }[] = []
+  ctx.chiTiles?.forEach(chi => list.push({ label: `吃 ${toMPSZ(chi)}`, decision: { action: 'chi', candidate: chi } }))
+  ctx.ponTiles?.forEach(pon => list.push({ label: `碰 ${toMPSZ(pon)}`, decision: { action: 'pon', candidate: pon } }))
+  ctx.kans?.forEach(kan => list.push({ label: `${kan.type} ${toMPSZ(kan.tiles)}`, decision: { action: 'kan', kan } }))
+  return list
+}
+
 function actionHint(slot: PromptSlot | undefined, player: { riichi: unknown }) {
   if (!slot) return ' '
   const options: string[] = []
@@ -407,11 +425,13 @@ function actionHint(slot: PromptSlot | undefined, player: { riichi: unknown }) {
     }
     if (slot.ctx.types.has('ryuukyoku')) options.push('[9] 九种九牌')
   } else if (slot.phase === 'ron') {
-    options.push('[o] 荣和', '[q] 跳过')
+    const from = slot.ctx.round.kiru?.playerId
+    options.push(`[o] 荣和${from === undefined ? '' : `←${from}`}`, '[q] 跳过')
   } else {
-    slot.ctx.chiTiles?.forEach((chi, i) => options.push(`[${i + 1}] 吃 ${toMPSZ(chi)}`))
-    slot.ctx.ponTiles?.forEach((pon, i) => options.push(`[${i + 1}] 碰 ${toMPSZ(pon)}`))
-    slot.ctx.kans?.forEach((kan, i) => options.push(`[${i + 1}] ${kan.type} ${toMPSZ(kan.tiles)}`))
+    // 后面写上是谁打的（和牌河里的座位号对应），方便判断振听和危险牌
+    const from = slot.ctx.round.kiru?.playerId
+    claimCandidates(slot.ctx).forEach((candidate, i) =>
+      options.push(`[${i + 1}] ${candidate.label}${from === undefined ? '' : `←${from}`}`))
     options.push('[q] 跳过')
   }
   if (options.length === 0) return ''
@@ -467,13 +487,12 @@ async function humanDecision(slot: PromptSlot): Promise<Decision> {
     else if (key === 'q' && ctx.types.has('pass')) return { action: 'pass' }
     else if (key === '9' && ctx.types.has('ryuukyoku')) return { action: 'ryuukyoku' }
     else if (/^[1-9]$/.test(key)) {
-      const pick = <T>(list: T[] | undefined) => list?.[Number(key) - 1]
-      const kan = pick(ctx.kans)
-      const chi = pick(ctx.chiTiles)
-      const pon = pick(ctx.ponTiles)
-      if (kan) return { action: 'kan', kan }
-      if (pon) return { action: 'pon', candidate: pon }
-      if (chi) return { action: 'chi', candidate: chi }
+      // 自家回合只有杠；别人打出的牌是吃/碰/明杠——编号和提示里显示的一致
+      const candidates: Decision[] = slot.phase === 'turn'
+        ? (ctx.kans ?? []).map(kan => ({ action: 'kan', kan }))
+        : claimCandidates(ctx).map(candidate => candidate.decision)
+      const decision = candidates[Number(key) - 1]
+      if (decision) return decision
       notice = '这个编号没有候选'
     } else if (key === 'm' && ctx.types.has('tsumogiri')) {
       return { action: 'tsumogiri' }
