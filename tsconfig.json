@@ -9,7 +9,7 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "declaration": true,
-    "strictBindCallApply": true,
+    "strict": true,
   },
   "include": ["src"],
 }

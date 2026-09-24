@@ -4,7 +4,7 @@
 import { shanten, waits } from './tenpai.js'
 import { MahjongError, TileKind, compareTileKind, createEmptyCounts, group, nextId, shimocha, shuffle, toMPSZ, toTileKinds, uniqTileKinds } from './utils.js'
 import { HoraResult, canHora, yaku } from './yaku.js'
-import { defaultProfile } from './profile.js'
+import { RuleProfile, defaultProfile } from './profile.js'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 export const kazes: Kaze[] = ['ton', 'nan', 'sha', 'pei']
@@ -64,7 +64,7 @@ export interface Action {
 export class Round {
   kanCount: number = 0
   // 正在"预备"的暗杠/加杠（等抢杠窗口走完才算成立，见 establishKan）
-  private pendingKan: { type: 'ankan' | 'chakan', playerId: PlayerId, tiles: Tile[] } | null = null
+  private pendingKan?: { type: 'ankan' | 'chakan', playerId: PlayerId, tiles: Tile[] }
   // 活牌山（摸牌顺序）。王牌不在这里，见 wanpai
   haiyama: Tile[]
   // 王牌（末尾 14 张，不会摸到，只用来当岭上牌和宝牌指示牌）。
@@ -77,40 +77,53 @@ export class Round {
   currentId: PlayerId = 0
 
   turn: number = 0
-  // 上一张被切/被鸣的牌（摸牌后清空）
-  kiru: Tile = null
+  // 上一张被切/被鸣的牌（摸牌后清空）。没牌 = 现在是摸牌状态，所以是问号；
+  // 谁切的记在这张牌的 playerId 上（打牌时不改，被鸣牌时就是喂牌的那家）
+  kiru?: Tile
+
+  // 刚被切/被鸣的那张牌。"刚有人打过牌"的状态下才有 —— 判定用 this.kiru，取值用这个
+  get discarded(): Tile {
+    if (!this.kiru) throw new MahjongError('unreachable', '现在没有弃牌')
+    return this.kiru
+  }
+
+  // 切这张牌（或喂这张牌）的人
+  get discarder(): PlayerId {
+    const playerId = this.discarded.playerId
+    if (playerId === undefined) throw new MahjongError('unreachable', '这张弃牌没记是谁打的')
+    return playerId
+  }
+
   // 这一张是杠后的补牌（岭上开花用），打牌后清空
   rinshan = false
 
   firstTurnIntact = true
-  // null -> 还没有打牌
-  // TileKind -> 已经被打的风牌
-  // false -> 没有四风连打
-  // true -> 四风连打
-  sufurenda: TileKind | boolean = null
 
-  // 规则开关：直接 new Round 的时候默认取 defaultProfile（= mLeague）；走 Mahjong 的话由 profile / 选项覆盖
-  kuidashiTanyao = defaultProfile.kuidashiTanyao
-  kiriageMangan = defaultProfile.kiriageMangan
-  doubleYakuman = defaultProfile.doubleYakuman
-  kazoeYakuman = defaultProfile.kazoeYakuman
-  abortiveDraws = defaultProfile.abortiveDraws
-  riichiNeedsFourTiles = defaultProfile.riichiNeedsFourTiles
-  kokushiAnkanChankan = defaultProfile.kokushiAnkanChankan
+  // 四风连打：第一巡里四家都打出同一张风牌。只看牌河就能算出来，不用另外记状态
+  get sufurenda(): boolean {
+    if (!this.firstTurnIntact) return false
+    const [first, ...rest] = this.players.map(player => player.discards[0])
+    if (!first || first.suit !== 'kaze') return false
+    return rest.every(tile => tile?.equals(first))
+  }
+
+  // 规则档（一局之内不变）。直接 new Round 时默认 mLeague，走 Mahjong 的话由 profile / 选项决定
+  readonly profile: RuleProfile
 
   constructor (
     // 场风
     public bakaze: Kaze,
     public dealer: PlayerId,
     tiles?: Tile[],
-    // 赤牌枚数：0 = 无赤牌，3 = 万/索/筒各一张（默认），4 = 再加一张赤 5m
-    redFives: 0 | 3 | 4 = 3,
+    profile: RuleProfile = defaultProfile,
   ) {
+    this.profile = profile
     if (!tiles) {
       tiles = []
       for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
         for (let i = 0; i < 9; i++) {
-          const red = i + 1 !== 5 ? 0 : suit === 'man' && redFives === 4 ? 2 : redFives === 0 ? 0 : 1
+          // 赤牌枚数：3 = 万/索/筒各一张（默认），4 = 再加一张赤 5m
+          const red = i + 1 !== 5 ? 0 : suit === 'man' && profile.redFives === 4 ? 2 : profile.redFives === 0 ? 0 : 1
           for (let j = 0; j < red; j++) tiles.push(new Tile(suit, i + 1, true))
           for (let j = 0; j < 4 - red; j++) tiles.push(new Tile(suit, i + 1, false))
         }
@@ -133,10 +146,12 @@ export class Round {
       }
       return tiles
     }
-    this.players = playerIds.map(id => new Player(this, id, setPlayerId(tiles.splice(0, 13), id)))
+    // 到这儿一定已经有牌山了（没传的话上面刚生成），固定成 const 好让下面的回调里类型不丢
+    const wall: Tile[] = tiles
+    this.players = playerIds.map(id => new Player(this, id, setPlayerId(wall.splice(0, 13), id)))
     // 末尾 14 张是王牌（岭上牌 + 宝牌指示牌），先切出来单独放
-    this.wanpai = tiles.splice(-14)
-    this.haiyama = tiles
+    this.wanpai = wall.splice(-14)
+    this.haiyama = wall
     this.mopai(true, this.dealer)
     // 配牌就听牌的人也要能荣和第一张弃牌，所以非庄家的听牌张先算出来。
     // （庄家这时手里是 14 张，"打完之后听什么"要等他打牌时才知道，dahai 里会算）
@@ -175,10 +190,11 @@ export class Round {
     id ??= nextId(this.currentId)
     // 岭上牌从王牌最尾幢上段起按顺序取（M.League 第2章第5条），所以从 wanpai 末尾拿
     const tile = isRinshan ? this.wanpai.pop() : this.haiyama.shift()
+    if (!tile) throw new MahjongError('unreachable', '摸牌: 牌山已经空了')
     tile.playerId = id
     this.players[id].tiles.push(tile)
     // 摸牌后上一张打出的牌就作废了（否则杠后补牌会被当成"刚打过牌"）
-    this.kiru = null
+    this.kiru = undefined
     this.rinshan = !!isRinshan
     this.currentId = id
     // 巡目以庄家为起点：庄家摸第二次就算进入下一巡；吃碰不摸牌，所以不会推进巡目
@@ -189,7 +205,7 @@ export class Round {
     }
   }
 
-  dahai(tile: Tile, riichi: boolean) {
+  dahai(tile: Tile, riichi = false) {
     const index = this.player.tiles.indexOf(tile)
     if (index === -1) throw new MahjongError('tile-not-in-hand', '打牌: 这张牌不在手牌里')
     if (this.player.kuikae.some(kind => tile.equals(kind))) {
@@ -219,24 +235,6 @@ export class Round {
     if (!isTerminal && !isHonor) {
       this.removeRyuukyokuMangan(this.currentId)
     }
-    if (this.firstTurnIntact) {
-      if (this.sufurenda === null) {
-        if (tile.suit === 'kaze') {
-          this.sufurenda = tile
-        } else {
-          this.sufurenda = false
-        }
-      } else if (typeof this.sufurenda !== 'boolean') {
-        if (compareTileKind(this.sufurenda, tile) !== 0) {
-          this.sufurenda = false
-        }
-      }
-      // 四风连打：四家都打出同一张风牌。第一巡按自风 东南西北 出牌，
-      // 所以"最后一家"是北家（北家的编号随庄家轮转，不是固定的 3 号）
-      if (this.sufurenda && this.player.seatWind === 'pei') {
-        this.sufurenda = true
-      }
-    }
     this.player.waits = waits
     if (riichi) {
       if (!this.player.waits || this.player.naki !== 0) {
@@ -265,14 +263,15 @@ export class Round {
       player.tiles.splice(index, 1)
     }
     this.player.discards.pop()
-    const called = this.kiru
+    const called = this.discarded
+    const discarder = this.discarder
     tiles.push(called)
     // 顺子按升序存放：三色同顺/一气通贯靠比较 tiles 数组判断
     player.chi.push(tiles.sort(compareTileKind))
     player.kuikae = chiKuikae(called, player.chi[player.chi.length - 1])
     this.currentId = id
     this.breakFirstTurnFlags()
-    this.removeRyuukyokuMangan(called.playerId)
+    this.removeRyuukyokuMangan(discarder)
   }
 
   pon(id: PlayerId, tiles: Tile[]) {
@@ -284,8 +283,8 @@ export class Round {
       player.tiles.splice(index, 1)
     }
     this.player.discards.pop()
-    const called = this.kiru
-    const discarder = called.playerId
+    const called = this.discarded
+    const discarder = this.discarder
     tiles.push(called)
     player.pon.push({
       tiles,
@@ -313,11 +312,11 @@ export class Round {
       player.tiles.splice(index, 1)
     }
     this.player.discards.pop()
-    tiles.push(this.kiru)
+    tiles.push(this.discarded)
     player.minkan.push(tiles)
 
     // 摸牌会把 kiru 清空，先记住放铳者是谁
-    const discarder = this.kiru.playerId
+    const discarder = this.discarder
     if (drawRinshan) this.mopai(true, id, true)
     this.kanCount++
     // 包：四つ目の槓が明槓なら、その牌を切った人が責任者
@@ -334,6 +333,7 @@ export class Round {
     for (const tile of tiles) {
       if (!this.player.tiles.includes(tile)) throw new MahjongError('tile-not-in-hand', '暗杠: 这张牌不在手牌里')
     }
+    // 杠牌和被鸣的牌一样都挂在 kiru 上：抢杠窗口问的就是这一张
     this.kiru = tiles[0]
     this.pendingKan = { type: 'ankan', playerId: this.currentId, tiles }
   }
@@ -350,7 +350,7 @@ export class Round {
   // 没人抢杠 → 这一杠就此成立：这时候才动牌、加杠计数、翻杠宝牌、破一発
   establishKan() {
     const kan = this.pendingKan
-    this.pendingKan = null
+    this.pendingKan = undefined
     if (!kan) return
     const player = this.players[kan.playerId]
     if (kan.type === 'ankan') {
@@ -377,11 +377,8 @@ export class Round {
   // 鸣牌会破坏一发、地和、九种九牌、双立直、四风连打
   breakFirstTurnFlags() {
     this.firstTurnIntact = false
-    this.sufurenda = false
-    for (const id of playerIds) {
-      if (this.players[id].riichi) {
-        this.players[id].riichi.iipatsu = false
-      }
+    for (const player of this.players) {
+      if (player.riichi) player.riichi.iipatsu = false
     }
   }
 
@@ -392,13 +389,13 @@ export class Round {
   // kiru.playerId === currentSeat：这一家就是最后打牌的人，已经打过牌了，在等别人响应
   // 否则：这一家还没打牌（刚摸完牌，或刚吃/碰完），由他们打牌
   // 返回 null 则为不需要操作
-  action(id: PlayerId, isChankan?: boolean, isAnkanChankan?: boolean): Action {
+  action(id: PlayerId, isChankan?: boolean, isAnkanChankan?: boolean): Action | null {
     const beforeDiscard = !this.kiru || this.kiru.playerId !== this.currentId
     if (beforeDiscard) {
       if (id !== this.currentId) return null
       const action: Action = { types: new Set() }
       // 九種九牌是途中流局，M.League 没有（abortiveDraws 关掉时不给这个选项）
-      if (this.firstTurnIntact && this.abortiveDraws) {
+      if (this.firstTurnIntact && this.profile.abortiveDraws) {
         const counts = group(this.players[id].tiles)
         const yaochu = [
           counts['man'][0], counts['man'][8],
@@ -453,14 +450,14 @@ export class Round {
         // 现算"打哪张能听牌"：用来判立直，以及看这一手有没有和牌张（自摸）
         const tenpaiDiscards = this.player.tenpaiDiscards()
         // 立直的牌山条件：默认按 M.League（只要不是刚摸到海底牌就能立），打开开关则要剩 ≥4 张
-        const wallOk = this.riichiNeedsFourTiles ? this.rest >= 4 : this.rest !== 0
+        const wallOk = this.profile.riichiNeedsFourTiles ? this.rest >= 4 : this.rest !== 0
         if (!this.player.riichi && this.player.naki === 0 && wallOk && tenpaiDiscards.length !== 0) {
           action.types.add('riichi')
         }
         for (const option of tenpaiDiscards) {
           const canWin = option.waits.some(wait => compareTileKind(option.discard, wait) === 0)
           if (canWin) {
-            const hora = yaku(this, this.players[id], null, true, false)
+            const hora = yaku(this, this.players[id], true)
             if (canHora(hora.yaku)) {
               action.hora = hora
               action.types.add('tsumo')
@@ -477,14 +474,14 @@ export class Round {
       if (id === this.currentId) return null
       const action: Action = { types: new Set() }
       const waits = this.players[id].waits
-      let tileKind: TileKind
-      if (waits && (tileKind = waits.find(wait => this.kiru.equals(wait)))) {
-        const hora = yaku(this, this.players[id], this.kiru, false, isChankan)
+      let tileKind: TileKind | undefined
+      if (waits && (tileKind = waits.find(wait => this.discarded.equals(wait)))) {
+        const hora = yaku(this, this.players[id], this.discarded, false, isChankan)
         if (canHora(hora.yaku) && !this.players[id].furiten && !this.players[id].dojunfuriten) {
           if (isChankan) {
             // 抢杠（加杠）。暗杠原则上谁都不能抢，只有开了 kokushiAnkanChankan 才放行国士无双
             const kokushi = !!hora.yaku.kokushiMusou || !!hora.yaku.kokushiMusou13
-            if (!isAnkanChankan || (this.kokushiAnkanChankan && kokushi)) {
+            if (!isAnkanChankan || (this.profile.kokushiAnkanChankan && kokushi)) {
               action.hora = hora
               action.types.add('ron')
             }
@@ -567,7 +564,7 @@ export class Player {
   minkan: Tile[][] = []
   ankan: Tile[][]  = []
   discards: Tile[] = []
-  riichi: Riichi
+  riichi?: Riichi
 
   // 听牌张。undefined（或任何假值）= 不听牌；空数组 = 听牌但没有能抽到的和牌张（等的那张自己攥着 4 张）
   // 判断听牌用真值 `if (player.waits)`：空数组是真值，所以"听牌但 0 张可抽"也算听牌；不要用长度判断
@@ -589,6 +586,11 @@ export class Player {
     public id: PlayerId,
     public tiles: Tile[],
   ) {}
+
+  // 手里最后一张牌。轮到自己、摸完牌之后（kiru 为空）它就是刚摸到的那张
+  get drawn(): Tile {
+    return this.tiles[this.tiles.length - 1]
+  }
 
   calcShantenAndWaits(tiles?: Tile[]): [number, TileKind[]] {
     tiles ||= this.tiles
@@ -642,7 +644,7 @@ export class Player {
   }
 
   get chiTiles() {
-    const current = this.round.kiru
+    const current = this.round.discarded
     if (['sangen', 'kaze'].includes(current.suit)) {
       return []
     }
@@ -680,7 +682,7 @@ export class Player {
     return chizai
   }
   get ponTiles() {
-    const current = this.round.kiru
+    const current = this.round.discarded
     const same = this.tiles.filter((tile) => tile.equals(current))
     const ponzai: Tile[][] = []
     // 手里 3 张同牌时 C(3,2) 种拿法只差"留下哪张"：留牌同种同红的算同一个选择
@@ -699,24 +701,20 @@ export class Player {
   }
   // （以下是三种杠各自的原始候选；ctx 会把它们合成 ctx.kans）
   get minkanTiles() {
-    const current = this.round.kiru
+    const current = this.round.discarded
     const same = this.tiles.filter((tile) => tile.equals(current))
     return same.length === 3 ? [same] : []
   }
   get ankanTiles() {
-    const tiles = [...this.tiles]
-    const group: Tile[][] = []
-    while (tiles.length !== 0) {
-      const same: Tile[] = [tiles.shift()]
-      let found: Tile
-      do {
-        const index = tiles.findIndex(tile => tile.equals(same[0]))
-        found = index !== -1 ? tiles.splice(index, 1)[0] : null
-        if (found) same.push(found)
-      } while (found)
-      group.push(same)
+    // 按"同一种牌"分组（红 5 和普通 5 算同一种），四张一组的才是暗杠候选
+    const groups = new Map<string, Tile[]>()
+    for (const tile of this.tiles) {
+      const key = `${tile.suit}${tile.rank}`
+      const group = groups.get(key) ?? []
+      group.push(tile)
+      groups.set(key, group)
     }
-    return group.filter(same => same.length === 4)
+    return [...groups.values()].filter(group => group.length === 4)
   }
   get chakanTiles() {
     const result: Tile[] = []

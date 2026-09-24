@@ -102,10 +102,10 @@ export interface Yaku {
   daisuushii?: 13 | 26
 }
 
-export const yakuman = ['tenhou', 'chiihou', 'daisangen', 'suuankou', 'tsuuiisou', 'ryuuiisou', 'chinroutou', 'kokushiMusou', 'shousuushii', 'suukantsu', 'chuurenPoutou']
-export const doubleyakuman = ['suuankouTanki', 'kokushiMusou13', 'junseiChuurenPoutou', 'daisuushii']
+export const yakuman: (keyof Yaku)[] = ['tenhou', 'chiihou', 'daisangen', 'suuankou', 'tsuuiisou', 'ryuuiisou', 'chinroutou', 'kokushiMusou', 'shousuushii', 'suukantsu', 'chuurenPoutou']
+export const doubleyakuman: (keyof Yaku)[] = ['suuankouTanki', 'kokushiMusou13', 'junseiChuurenPoutou', 'daisuushii']
 
-type HoraType = 'chiitoitsu' | 'kokushiMusou' | 'kokushiMusou13' | 'normal'
+type HoraType = 'chiitoitsu' | 'kokushiMusou' | 'kokushiMusou13' | 'normal' | 'invalid'
 
 function horaType(player: Player, tiles: TileKind[]): HoraType {
   const counts = group(tiles)
@@ -125,15 +125,26 @@ function horaType(player: Player, tiles: TileKind[]): HoraType {
   if (shanten === -1) {
     return 'normal'
   }
+  // 不是和牌形（调用方用错）：调用方会走"保留已经攒到的役"那条路
+  return 'invalid'
 }
 
-export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: boolean, isChankan: boolean): HoraResult {
+/** 自摸：和牌张就是刚摸到的那张（还在 player.tiles 里），不用传 */
+export function yaku(round: Round, player: Player, isTsumo: boolean, isChankan?: boolean): HoraResult
+/** 荣和 / 抢杠：传打出（或被杠）的那张，它不在 player.tiles 里 */
+export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: boolean, isChankan?: boolean): HoraResult
+export function yaku(
+  round: Round, player: Player,
+  horaTileOrTsumo: TileKind | boolean,
+  isTsumo = false, isChankan = false,
+): HoraResult {
   const yaku: Yaku = { fu: 20, fan: 0 }
   const handTiles: TileKind[] = [...player.tiles]
-  if (!horaTile) {
-    horaTile = handTiles.pop()
-  }
-  let handType = horaType(player, handTiles.concat(horaTile))
+  // 自摸的那张先拿出来，让 handTiles 保持 13 张
+  const win = typeof horaTileOrTsumo === 'boolean' ? handTiles.pop() : horaTileOrTsumo
+  if (!win) throw new MahjongError('unreachable', 'yaku: 手里没有和牌张')
+  if (typeof horaTileOrTsumo === 'boolean') isTsumo = horaTileOrTsumo
+  let handType = horaType(player, handTiles.concat(win))
 
   // 门清荣和才有 10 符加成
   if (!isTsumo && player.naki === 0) {
@@ -157,7 +168,7 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
 
   const allTiles: TileKind[] = [
     handTiles, player.chi, player.pon.map(pon => pon.tiles),
-    player.minkan, player.ankan, horaTile,
+    player.minkan, player.ankan, win,
   ].flat(2)
   if (player.riichi) {
     if (player.naki !== 0) throw new MahjongError('unreachable', '立直: 有副露的人不能立直')
@@ -184,7 +195,7 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
     }
   }
   // 食断：关掉时只有门清才认断幺九（副露的断幺九不算役）
-  if (isTanyao && (round.kuidashiTanyao || player.naki === 0)) {
+  if (isTanyao && (round.profile.kuidashiTanyao || player.naki === 0)) {
     yaku.tanyao = 1
   }
   if (isChankan) {
@@ -268,7 +279,7 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
   }
   let isHonitsu = true
   let isChinitsu = true
-  let flushSuit: Suit
+  let flushSuit: Suit | undefined
   for (const tile of allTiles) {
     if (['man', 'so', 'pin'].includes(tile.suit)) {
       if (!flushSuit) {
@@ -347,13 +358,13 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
     // 七对子形有时也能拆成普通形（例：112233m445566p77m 同时是二盃口），
     // 两个解读都算出来，取基本点高的那个
     const results: HoraResult[] = [finalize({ ...yaku, fu: 25, chiitoitsu: 2 }, round, true)]
-    if (normalShanten(group(handTiles.concat(horaTile)), player.naki + player.ankan.length) === -1) {
-      results.push(...normalResults(round, player, yaku, handTiles, horaTile, isTsumo))
+    if (normalShanten(group(handTiles.concat(win)), player.naki + player.ankan.length) === -1) {
+      results.push(...normalResults(round, player, yaku, handTiles, win, isTsumo))
     }
     return results.reduce((acc, x) => x.points > acc.points ? x : acc)
   }
   if (handType === 'normal') {
-    const results = normalResults(round, player, yaku, handTiles, horaTile, isTsumo)
+    const results = normalResults(round, player, yaku, handTiles, win, isTsumo)
     if (results.length === 0) throw new MahjongError('unreachable', 'yaku: 这手牌没有可用的分解')
     // 待ち与分解都有多个时取基本点最高的那个
     return results.reduce((acc, x) => x.points > acc.points ? x : acc)
@@ -591,8 +602,8 @@ function normalYaku(
   if (player.naki === 0) {
     let count = 0
     const restShuntsu = [...shuntsu]
-    let block: Block
-    while (block = restShuntsu.shift()) {
+    while (restShuntsu.length !== 0) {
+      const block = restShuntsu.shift()!
       const index = restShuntsu.findIndex(shuntsu =>
         shuntsu.suit === block.suit && arrayEquals(shuntsu.tiles, block.tiles))
       if (index !== -1) {
@@ -608,8 +619,8 @@ function normalYaku(
   }
   const restKotsu = [...kotsu]
   if (restKotsu.length >= 3) {
-    let block: Block
-    while (block = restKotsu.shift()) {
+    while (restKotsu.length !== 0) {
+      const block = restKotsu.shift()!
       let same = 1
       for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
         if (block.suit === suit) continue
@@ -714,8 +725,8 @@ function normalYaku(
   }
   const restShuntsu = [...shuntsu]
   if (restShuntsu.length >= 3) {
-    let block: Block
-    while (block = restShuntsu.shift()) {
+    while (restShuntsu.length !== 0) {
+      const block = restShuntsu.shift()!
       let same = 1
       for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
         if (block.suit === suit) continue
@@ -750,32 +761,27 @@ function finalize(result: Yaku, round: Round, isChiitoitsu?: boolean): HoraResul
   // 七对子与国士无双按约定的固定 25 符，其余按 10 符进位
   const fixedFu = isChiitoitsu || !!result.kokushiMusou || !!result.kokushiMusou13
   const fu = fixedFu ? result.fu : Math.ceil(result.fu / 10) * 10
+  const { doubleYakuman, kazoeYakuman, kiriageMangan } = round.profile
   const newYaku: Yaku = { fu, fan: 0 }
-  for (const ykm of yakuman) {
-    if (ykm in result) {
-      newYaku[ykm] = 13
-      newYaku.fan += 13
-    }
-  }
-  for (const ykm of doubleyakuman) {
-    if (ykm in result) {
-      // 双倍役满：关掉开关时按单倍（13 番）算
-      const fan = round.doubleYakuman ? 26 : 13
-      newYaku[ykm] = fan
-      newYaku.fan += fan
-    }
-  }
-  if (newYaku.fan >= 13) return { yaku: newYaku, points: basicPoints(newYaku.fan, fu, round.kiriageMangan) }
+  // 役满：一门 13 番；双倍役满（四暗刻单骑这些）开着的时候一门 26 番
+  const yakumanNames = yakuman.filter(name => name in result)
+  const doubleNames = doubleyakuman.filter(name => name in result)
+  const doubleFan = doubleYakuman ? 26 : 13
+  // Yaku 各字段的类型是那门役自己的翻数（1 | 2 | 3 | 13 这种），按名字写值只能先把索引放宽
+  for (const name of yakumanNames) (newYaku as any)[name] = 13
+  for (const name of doubleNames) (newYaku as any)[name] = doubleFan
+  newYaku.fan = yakumanNames.length * 13 + doubleNames.length * doubleFan
+  if (newYaku.fan >= 13) return { yaku: newYaku, points: basicPoints(newYaku.fan, fu, kiriageMangan) }
   for (const [name, fan] of Object.entries(result)) {
     if (['fu', 'fan'].includes(name)) continue
-    newYaku[name] = fan
+    (newYaku as any)[name] = fan
     newYaku.fan += fan
   }
   // 数え役满：关掉时（M.League 第6章第6条）13 番以上按三倍满封顶
-  if (!round.kazoeYakuman && newYaku.fan >= 13) {
+  if (!kazoeYakuman && newYaku.fan >= 13) {
     return { yaku: newYaku, points: 6000 }
   }
-  return { yaku: newYaku, points: basicPoints(newYaku.fan, fu, round.kiriageMangan) }
+  return { yaku: newYaku, points: basicPoints(newYaku.fan, fu, kiriageMangan) }
 }
 
 // 基本点：役满按 8000 × 役满倍数算，调用方再乘庄家/闲家倍数

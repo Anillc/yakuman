@@ -427,7 +427,7 @@ function claimCandidates(ctx: MahjongContext) {
   return list
 }
 
-function actionHint(slot: PromptSlot | undefined, player: { riichi: unknown }) {
+function actionHint(slot: PromptSlot | undefined, player: { riichi?: unknown }) {
   if (!slot) return ' '
   const options: string[] = []
   if (slot.phase === 'turn') {

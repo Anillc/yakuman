@@ -12,6 +12,7 @@ export type MahjongErrorCode =
   | 'kuikae'
   | 'prompt-done'
   | 'out-of-order'
+  | 'no-round-end'
   | 'unreachable'
 
 export class MahjongError extends Error {
