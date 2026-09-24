@@ -305,102 +305,85 @@ describe('本场与连庄', () => {
   }
 })
 
-describe('南四局（オーラス）的终局', () => {
-  // 南四局、指定分数、指定局终结果 → 整场还能不能继续
-  const oorasu = (score: number[], end: MahjongEnd) => {
-    const mahjong = new Mahjong()
-    mahjong.bakaze = 'nan'
-    mahjong.kyoku = 4
-    mahjong.score = [...score]
-    mahjong.lastEnd = end
-    return (mahjong as unknown as { canNextRound(): boolean }).canNextRound()
-  }
-  const dealerTsumo: MahjongEnd = {
-    type: 'hora',
-    hora: [{ type: 'tsumo', id: 0, score: 0, points: 2000, yaku: { fu: 30, fan: 3 } }],
-  }
-  const dealerTenpaiDraw: MahjongEnd = { type: 'ryuukyoku', ryuukyoku: { type: 'hoapai', tenpai: [0], mangan: [] } }
-
-  it('庄家是全桌最高分就不再连庄（あがりやめ）', () => {
-    assert.equal(oorasu([40000, 20000, 20000, 20000], dealerTsumo), false, '庄家自摸')
-    assert.equal(oorasu([40000, 20000, 20000, 20000], dealerTenpaiDraw), false, '庄家听牌流局')
-  })
-
-  it('并列第一也算第一', () => {
-    assert.equal(oorasu([30000, 30000, 20000, 20000], dealerTsumo), false, '和 1 号同分')
-  })
-
-  it('庄家不是第一就照常连庄', () => {
-    assert.equal(oorasu([20000, 30000, 25000, 25000], dealerTsumo), true, '庄家中游')
-    assert.equal(oorasu([20000, 30000, 25000, 25000], dealerTenpaiDraw), true)
-    assert.equal(oorasu([10000, 30000, 30000, 30000], dealerTsumo), true, '庄家垫底也照打')
-  })
-
-  it('闲家和了 / 荒牌流局庄家不聴是轮庄结束，和最高分是谁无关', () => {
-    const childWin: MahjongEnd = {
-      type: 'hora',
-      hora: [{ type: 'ron', id: 1, score: 0, points: 1000, yaku: { fu: 30, fan: 1 } }],
-    }
-    assert.equal(oorasu([40000, 20000, 20000, 20000], childWin), false)
-    const childTenpaiDraw: MahjongEnd = { type: 'ryuukyoku', ryuukyoku: { type: 'hoapai', tenpai: [1], mangan: [] } }
-    assert.equal(oorasu([40000, 20000, 20000, 20000], childTenpaiDraw), false)
-  })
-})
-
-describe('西入（サドンデス）', () => {
-  // 南四 / 西四局、指定分数、指定局终结果 → 整场还能不能继续（能继续就顺手推进一局看落在哪）
-  const ending = (
-    rules: Partial<RuleProfile>, score: number[], at: { bakaze: 'nan' | 'sha', kyoku: number }, end: MahjongEnd,
+describe('终局条件（南四 / 西入 / 西四）', () => {
+  // 指定场风局数、分数、局终结果 → 整场还能不能继续；能继续就顺手推进一局看落在哪
+  const after = (
+    score: number[], end: MahjongEnd,
+    options: { rules?: Partial<RuleProfile>, bakaze?: 'nan' | 'sha', kyoku?: number } = {},
   ) => {
-    const mahjong = new Mahjong({ profile: { ...defaultProfile, ...rules } })
-    mahjong.bakaze = at.bakaze
-    mahjong.kyoku = at.kyoku
+    const mahjong = new Mahjong({ profile: { ...defaultProfile, suddenDeath: true, ...options.rules } })
+    mahjong.bakaze = options.bakaze ?? 'nan'
+    mahjong.kyoku = options.kyoku ?? 4
     mahjong.score = [...score]
     mahjong.lastEnd = end
     const canContinue = (mahjong as unknown as { canNextRound(): boolean }).canNextRound()
     const advanced = canContinue ? (mahjong as unknown as { nextRound(): boolean }).nextRound() : false
     return { canContinue, advanced, mahjong }
   }
+  const dealerWin: MahjongEnd = {
+    type: 'hora',
+    hora: [{ type: 'tsumo', id: 0, score: 0, points: 2000, yaku: { fu: 30, fan: 3 } }],
+  }
   const childWin: MahjongEnd = {
     type: 'hora',
     hora: [{ type: 'ron', id: 1, score: 0, points: 1000, yaku: { fu: 30, fan: 1 } }],
   }
+  const dealerTenpaiDraw: MahjongEnd = { type: 'ryuukyoku', ryuukyoku: { type: 'hoapai', tenpai: [0], mangan: [] } }
   const childTenpaiDraw: MahjongEnd = { type: 'ryuukyoku', ryuukyoku: { type: 'hoapai', tenpai: [1], mangan: [] } }
 
-  it('M.League（没有西入）：南四打完没人到 30000 也收官', () => {
-    assert.equal(ending({}, [26000, 25000, 25000, 24000], { bakaze: 'nan', kyoku: 4 }, childWin).canContinue, false)
+  it('南四：庄家连庄时，庄家第一 + 有人到 30000 才收官（あがりやめ）', () => {
+    assert.equal(after([40000, 20000, 20000, 20000], dealerWin).canContinue, false, '亲和了、庄家第一')
+    assert.equal(after([31000, 31000, 20000, 18000], dealerTenpaiDraw).canContinue, false, '并列第一也算')
+    assert.equal(after([20000, 40000, 20000, 20000], dealerWin).canContinue, true, '庄家不是第一 → 继续连庄')
   })
 
-  it('开了西入：南四打完没人到 30000 就接着打西场', () => {
-    const { canContinue, advanced, mahjong } =
-      ending({ suddenDeath: true }, [26000, 25000, 25000, 24000], { bakaze: 'nan', kyoku: 4 }, childWin)
-    assert.equal(canContinue, true)
-    assert.equal(advanced, true)
-    assert.equal(mahjong.bakaze, 'sha', '进西场')
-    assert.equal(mahjong.kyoku, 1, '从西一局开始')
+  it('南四：庄家连庄但没人到 30000 → 继续打南四', () => {
+    assert.equal(after([29000, 25000, 25000, 21000], dealerWin).canContinue, true, '庄家第一但没到 30000')
+    assert.equal(after([25000, 25000, 25000, 25000], dealerTenpaiDraw).canContinue, true)
   })
 
-  it('开了西入：南四打完已经有人到 30000 就直接收官', () => {
-    const at = { bakaze: 'nan' as const, kyoku: 4 }
-    assert.equal(ending({ suddenDeath: true }, [30000, 25000, 25000, 24000], at, childWin).canContinue, false)
+  it('南四：庄家连庄结束、有人到 30000 → 终局', () => {
+    assert.equal(after([40000, 20000, 20000, 20000], childWin).canContinue, false)
+    assert.equal(after([40000, 20000, 20000, 20000], childTenpaiDraw).canContinue, false, '荒牌流局庄家不聴也一样')
   })
 
-  it('西场里有人到 30000 点以上就终局，没人到就继续（30000 整也算）', () => {
-    const west1 = { bakaze: 'sha' as const, kyoku: 1 }
-    assert.equal(ending({ suddenDeath: true }, [30000, 25000, 25000, 24000], west1, childWin).canContinue, false)
-    assert.equal(ending({ suddenDeath: true }, [29900, 25000, 25000, 24000], west1, childWin).canContinue, true)
+  it('南四：庄家连庄结束、没人到 30000 → 西入（不开西入的档直接收官）', () => {
+    const west = after([26000, 25000, 25000, 24000], childWin)
+    assert.equal(west.canContinue, true)
+    assert.equal(west.advanced, true)
+    assert.equal(west.mahjong.bakaze, 'sha', '进西场')
+    assert.equal(west.mahjong.kyoku, 1, '从西一局开始')
+    assert.equal(after([26000, 25000, 25000, 24000], childWin, { rules: { suddenDeath: false } }).canContinue,
+      false, 'M.League 不西入')
   })
 
-  it('不会北入：西四庄家没连庄就收官', () => {
-    const west4 = { bakaze: 'sha' as const, kyoku: 4 }
-    assert.equal(ending({ suddenDeath: true }, [25000, 25000, 25000, 25000], west4, childTenpaiDraw).canContinue, false)
+  it('30000 点整也算到线（以上）', () => {
+    assert.equal(after([30000, 25000, 25000, 20000], childWin).canContinue, false, '刚好 30000 → 终局')
+    assert.equal(after([29900, 25000, 25000, 20100], childWin).canContinue, true, '29900 → 西入')
+  })
+
+  it('西场：有人到 30000 就终局，没人到就继续', () => {
+    const west2 = { bakaze: 'sha' as const, kyoku: 2 }
+    assert.equal(after([30000, 25000, 25000, 20000], childWin, west2).canContinue, false)
+    assert.equal(after([29900, 25000, 25000, 20100], childWin, west2).canContinue, true)
+  })
+
+  it('西四：不北入，庄家连庄结束就收官（不管分数）', () => {
+    const west4 = { bakaze: 'sha' as const }
+    assert.equal(after([25000, 25000, 25000, 25000], childWin, west4).canContinue, false)
+    assert.equal(after([25000, 25000, 25000, 25000], childTenpaiDraw, west4).canContinue, false)
+  })
+
+  it('西四：庄家连庄时和南四一样（第一 + 有人到 30000 才收官）', () => {
+    const west4 = { bakaze: 'sha' as const }
+    assert.equal(after([40000, 20000, 20000, 20000], dealerWin, west4).canContinue, false)
+    assert.equal(after([29000, 25000, 25000, 21000], dealerWin, west4).canContinue, true, '没人超过 → 继续西四')
   })
 
   it('被飞（箱割れ）：开关打开才结束半庄，M.League 打到最终局', () => {
     const busted = [26900, -1000, 25000, 24100]
-    const nan4 = { bakaze: 'nan' as const, kyoku: 4 }
-    assert.equal(ending({ suddenDeath: true, bustEndsGame: true }, busted, nan4, childWin).canContinue, false)
-    assert.equal(ending({ suddenDeath: true, bustEndsGame: false }, busted, nan4, childWin).canContinue, true)
+    assert.equal(after(busted, childWin, { rules: { bustEndsGame: true } }).canContinue, false)
+    assert.equal(after(busted, childWin, { rules: { bustEndsGame: false } }).canContinue, true)
   })
 })
 

@@ -193,6 +193,31 @@ describe('抢杠', () => {
     const action = round.action(0)!
     assert.ok(action.kans?.some(kan => kan.type === 'ankan'), '自己有暗杠候选')
   })
+
+  it('立直中的暗杠：听牌张不变才给候选', () => {
+    // 立直中、摸到第 4 张时，先算杠前杠后的听牌张（M.League 第4章第5条：面子构成不变才允许）
+    const riichiDraw = (hand13: string, drawn: string) => {
+      const round = roundOf()
+      const player = round.players[1]
+      player.tiles = tiles(hand13)
+      player.waits = player.calcShantenAndWaits()[1]
+      player.riichi = { double: false, iipatsu: false }
+      round.currentId = 1
+      round.kiru = undefined
+      player.tiles.push(tiles(drawn)[0])
+      return { player, action: round.action(1)! }
+    }
+    // 234678m 3s 234777p → 摸 7p：杠前杠后都是 単騎 3s
+    const same = riichiDraw('234678m3s234777p', '7p')
+    assert.deepEqual(same.player.waits, [{ suit: 'so', rank: 3 }], '杠前等 3s')
+    assert.deepEqual(same.action.kans?.map(kan => kan.type), ['ankan'], '听牌张不变 → 可以杠')
+    // 1155567789m 456s → 摸 5m：杠掉 5m 会把 1m 的听口一起杠掉
+    const changed = riichiDraw('1155567789m456s', '5m')
+    assert.deepEqual(changed.player.waits, [
+      { suit: 'man', rank: 1 }, { suit: 'man', rank: 5 }, { suit: 'man', rank: 8 },
+    ], '杠前等 1m / 5m / 8m')
+    assert.deepEqual(changed.action.kans ?? [], [], '听牌张会变 → 不给暗杠候选')
+  })
 })
 
 describe('三槓子 / 四槓子 / 岭上开花', () => {

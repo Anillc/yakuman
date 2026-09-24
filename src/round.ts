@@ -237,7 +237,8 @@ export class Round {
     }
     this.player.waits = waits
     if (riichi) {
-      if (!this.player.waits || this.player.naki !== 0) {
+      // 0 张可抽的听牌在不算听牌的档里同样不能立直（第3章第11条）
+      if (!waits || this.player.naki !== 0 || (waits.length === 0 && !this.profile.zeroWaitTenpai)) {
         throw new MahjongError('unreachable', '立直: 打这张之后不听牌（应该由调用方先检查）')
       }
       tile.riichi = true
@@ -468,7 +469,9 @@ export class Round {
         const tenpaiDiscards = this.player.tenpaiDiscards()
         // 立直的牌山条件：默认按 M.League（只要不是刚摸到海底牌就能立），打开开关则要剩 ≥4 张
         const wallOk = this.profile.riichiNeedsFourTiles ? this.rest >= 4 : this.rest !== 0
-        if (!this.player.riichi && this.player.naki === 0 && wallOk && tenpaiDiscards.length !== 0) {
+        // 0 张可抽的听牌算不算听牌：不算的档（M.League 第3章第11条）里也不能拿它立直
+        const tenpaiOk = tenpaiDiscards.some(option => this.profile.zeroWaitTenpai || option.waits.length !== 0)
+        if (!this.player.riichi && this.player.naki === 0 && wallOk && tenpaiOk) {
           action.types.add('riichi')
         }
         for (const option of tenpaiDiscards) {

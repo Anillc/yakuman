@@ -118,7 +118,7 @@ describe('Prompt 的守卫', () => {
     const player = round.players[0]
     round.currentId = 0
     round.kiru = undefined
-    player.tiles = tiles('123456789m1234p')   // 刚摸完、打 4p 就听
+    player.tiles = tiles('123456789m1234p5p')   // 刚摸到 5p、打 4p 就听
     player.riichi = undefined
     player.waits = undefined
     assert.ok(round.action(0)!.types.has('riichi'), '手牌层面可以立直')
@@ -126,6 +126,34 @@ describe('Prompt 的守卫', () => {
     ;(mahjong as unknown as { next(): void }).next()
     const slot = (mahjong as unknown as { pending: { current: { ctx: MahjongContext } } }).pending.current
     assert.ok(!slot.ctx.types.has('riichi'), '点数不够时不该给立直选项')
+  })
+
+  it('0 张可抽的听牌不能立直（不算听牌的档）', () => {
+    // 手里 3333p44445p7777z 等 7z，但 7z 四张全在自己手里 —— 0 枚听牌
+    type Turn = {
+      current: { ctx: MahjongContext }
+      apply: (ctx: MahjongContext, decision: { action: 'tsumogiri', riichi?: boolean }) => boolean
+    }
+    const setup = (zeroWaitTenpai: boolean) => {
+      const mahjong = new Mahjong({ profile: { ...defaultProfile, zeroWaitTenpai } })
+      const round = mahjong.round
+      const player = round.players[0]
+      round.currentId = 0
+      round.kiru = undefined
+      player.tiles = tiles('3333p44445p7777z9m')   // 刚摸到 9m，打 9m 之后就是 0 枚听牌
+      ;(mahjong as unknown as { next(): void }).next()
+      const turn = (mahjong as unknown as { pending: Turn }).pending
+      return { player, turn, ctx: turn.current.ctx }
+    }
+    const league = setup(false)
+    assert.deepEqual(league.player.waitsAfterDiscard(league.player.tiles.at(-1)!), [], 'M.League 档：算 0 枚')
+    assert.ok(league.ctx.types.has('riichi'), '还有别的切法能听，所以给立直选项')
+    expectThrow('riichi-not-tenpai', () => league.turn.apply(league.ctx, { action: 'tsumogiri', riichi: true }))
+    assert.equal(league.player.riichi, undefined, '没立直上')
+
+    const majsoulStyle = setup(true)
+    majsoulStyle.turn.apply(majsoulStyle.ctx, { action: 'tsumogiri', riichi: true })
+    assert.ok(majsoulStyle.player.riichi, '0 枚听牌照算听的档里可以立直')
   })
 })
 

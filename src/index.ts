@@ -412,7 +412,9 @@ export class Mahjong {
   private discard(ctx: MahjongContext, tile: Tile, riichi?: boolean) {
     if (riichi) {
       if (!ctx.types.has('riichi')) throw new MahjongError('action-not-allowed', '立直: 现在不能立直')
-      if (!ctx.player.waitsAfterDiscard(tile)) {
+      // 0 张可抽的听牌（听牌张都被自己手牌/副露吃掉）在不算听牌的档里也不能立直
+      const waits = ctx.player.waitsAfterDiscard(tile)
+      if (!waits || (waits.length === 0 && !this.profile.zeroWaitTenpai)) {
         throw new MahjongError('riichi-not-tenpai', '立直: 打这张之后不听牌')
       }
     }
@@ -728,23 +730,28 @@ export class Mahjong {
     if (this.profile.bustEndsGame && this.score.some(score => score < 0)) {
       return false
     }
-    // 南四局（オーラス）本来是连庄局（亲和了 / 亲听牌流局），而庄家已经是全桌最高分（并列第一也算）
-    // 就不再连庄、直接终局（あがりやめ）。庄家不是第一照常连庄；本来就不连庄的收官局走下面那条
-    if (this.bakaze === 'nan' && this.kyoku === 4 && this.oyaRepeats()) {
-      const dealerScore = this.score[this.round.dealer]
-      if (playerIds.every(id => this.score[id] <= dealerScore)) {
-        return false
-      }
+    // 有人到 30000 点以上了吗（正好 30000 也算）？南四的收官条件和西场的终局条件都看它
+    const reached30000 = this.score.some(score => score >= 30000)
+    // 庄家是不是全桌最高分（并列第一也算）
+    const dealerScore = this.score[this.round.dealer]
+    const dealerTop = playerIds.every(id => this.score[id] <= dealerScore)
+    // 连庄局（亲和了 / 亲听牌流局）：南四 / 西四本来要接着打同一局，
+    // 只有庄家已经是第一（并列也算）而且有人到了 30000 点才收官（あがりやめ）
+    if (this.oyaRepeats()) {
+      return !(['nan', 'sha'].includes(this.bakaze) && this.kyoku === 4 && dealerTop && reached30000)
     }
-    // 西入（サドンデス）：进了西场之后谁先到 30000 点以上，这一局打完就终局
-    if (this.profile.suddenDeath && this.bakaze === 'sha' && this.score.some(score => score >= 30000)) {
+    // 收官局（庄家连庄结束）：
+    //   南四：有人到 30000 就终局；没人到就西入（没开西入的档打完南四就结束，M.League 不西入）
+    //   西四：不北入，有人到没到 30000 都直接结束
+    if (this.bakaze === 'nan' && this.kyoku === 4) {
+      return !reached30000 && this.profile.suddenDeath
+    }
+    if (this.bakaze === 'sha' && this.kyoku === 4) {
       return false
     }
-    // 最终局（南四 / 西四）庄家没连庄就是收官局：
-    // 没开西入时南四打完就结束（M.League 打满东场 + 南场，不会北入）；
-    // 开了西入（雀魂）时南四打完还没人到 30000 点就继续打西场，西四庄家没连庄同样收官
-    if (['nan', 'sha'].includes(this.bakaze) && this.kyoku === 4 && !this.oyaRepeats()) {
-      return this.bakaze === 'nan' && this.profile.suddenDeath && !this.score.some(score => score >= 30000)
+    // 西场（西入之后）：有人到 30000 点以上，这一局打完就终局
+    if (this.profile.suddenDeath && this.bakaze === 'sha' && reached30000) {
+      return false
     }
     return true
   }

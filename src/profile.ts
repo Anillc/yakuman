@@ -33,7 +33,8 @@ export interface RuleProfile {
   suddenDeath: boolean
   // 数え役满：true = 13 番以上的普通役按役满算；false = 封顶三倍满
   kazoeYakuman: boolean
-  // 0 张可抽的听牌（听牌张都被自己的手牌/副露吃掉）算不算听牌
+  // 0 张可抽的听牌（听牌张都被自己的手牌/副露吃掉）算不算听牌。也算进立直条件：
+  // false 时既不算听（听牌料/连荘）也不能立直（M.League 第3章第11条）
   zeroWaitTenpai: boolean
   // 立直要求牌山还剩 ≥4 张（false = 只禁止"摸到海底牌之后立直"）
   riichiNeedsFourTiles: boolean
