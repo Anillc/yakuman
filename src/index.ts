@@ -626,26 +626,34 @@ export class Mahjong {
     return true
   }
 
-  // 本局结束后庄家是否连庄（和牌者有庄家，或者荒牌流局庄家听牌）
+  // 本局结束后庄家是否连庄：和牌者有庄家 / 荒牌流局庄家听牌 / 中途流局亲续投
   private oyaRepeats(): boolean {
     const end = this.lastEnd
     let oya = false
     if (end.type === 'hora') {
       oya = end.hora.some(hora => this.round.players[hora.id].isDealer)
-    } else if (end.type === 'ryuukyoku' && end.ryuukyoku.type === 'hoapai') {
-      oya = end.ryuukyoku.tenpai.some(id => this.round.players[id].isDealer)
+    } else if (end.type === 'ryuukyoku') {
+      // 荒牌流局（含流局满贯）看亲听不听；中途流局（九種九牌 / 四風連打 / 四家立直 / 四槓散了）亲续投
+      oya = end.ryuukyoku.type === 'hoapai'
+        ? end.ryuukyoku.tenpai.some(id => this.round.players[id].isDealer)
+        : true
     }
     return oya
   }
 
-  // 本局结束后推进：连庄（本场棒 +1）、进下一局（庄家轮转）、进下一场（场风推进），
+  // 本局结束后推进：连庄（亲继续）、进下一局（庄家轮转）、进下一场（场风推进），
   // 或者返回 false 表示整场结束（被飞 / 西入超分 / 南四局结束）
   private nextRound(): boolean {
     if (!this.canNextRound()) return false
     // 这一局的庄家（createRound 会把 round 换掉，先记下来）
     const dealer = this.round.dealer
-    if (this.oyaRepeats()) {
-      this.homba++
+    const oyaRepeats = this.oyaRepeats()
+    // 本场：连庄（亲和了 / 亲听牌流局 / 中途流局）累积 +1；轮庄（亲换人）归 0。
+    // 桌上的 100 点棒只是亲摆的计数标记，轮庄时由亲收回，和了者不收它 —— 和了时另外收的
+    // 300/本 是付点方出的（自摸三家分摊、荣和放铳者出），立直棒才是真的供託
+    if (oyaRepeats) this.homba++
+    else this.homba = 0
+    if (oyaRepeats) {
       this.createRound(dealer)
     } else if (this.kyoku < 4) {
       this.kyoku++
