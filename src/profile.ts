@@ -29,6 +29,8 @@ export interface RuleProfile {
   abortiveDraws: boolean
   // 被飞：true = 有人点数变负数就结束半庄（箱割れ）
   bustEndsGame: boolean
+  // 西入（サドンデス）：南四局结束时没人到 30000 点就接着打西场，谁先到 30000 点以上就终局
+  suddenDeath: boolean
   // 数え役满：true = 13 番以上的普通役按役满算；false = 封顶三倍满
   kazoeYakuman: boolean
   // 0 张可抽的听牌（听牌张都被自己的手牌/副露吃掉）算不算听牌
@@ -42,7 +44,7 @@ export interface RuleProfile {
 // RuleProfile 的所有键（顺序就是文档顺序）。想遍历/展示开关的时候用它
 export const ruleKeys = [
   'multipleRon', 'pao', 'redFives', 'kuidashiTanyao', 'kiriageMangan', 'nagashiMangan',
-  'doubleYakuman', 'abortiveDraws', 'bustEndsGame', 'kazoeYakuman',
+  'doubleYakuman', 'abortiveDraws', 'bustEndsGame', 'suddenDeath', 'kazoeYakuman',
   'zeroWaitTenpai', 'riichiNeedsFourTiles', 'kokushiAnkanChankan',
 ] as const satisfies readonly (keyof RuleProfile)[]
 
@@ -66,6 +68,8 @@ export const mLeague: RuleProfile = {
   abortiveDraws: false,
   // 第3章第2条「持ち点が無くなった場合でも最終局が終了するまで続行する」
   bustEndsGame: false,
+  // 第1章第1条「東南二風の半荘」＋ 条文里没有西入
+  suddenDeath: false,
   // 第6章第6条「役満以外の役が複合したアガリ点は、三倍満までを上限とする」
   kazoeYakuman: false,
   // 第3章第11条「自己の手牌・副露牌でアガリ牌が消去されている場合は認められない」
@@ -100,6 +104,8 @@ export const majsoul: RuleProfile = {
   abortiveDraws: true,
   // 箱割れ（点数变负）就结束半庄
   bustEndsGame: true,
+  // 南四结束还没人到 30000 点就西入，谁先到 30000 点以上就终局
+  suddenDeath: true,
   // 13 番以上算数え役满
   kazoeYakuman: true,
   // 0 张可抽的听牌照算听牌

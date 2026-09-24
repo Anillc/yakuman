@@ -99,6 +99,39 @@ describe('向听与听牌', () => {
     assert.equal(waits.length, 0, `可抽的听牌张：${JSON.stringify(waits)}`)
   })
 
+  it('0 张可抽的听牌：第 4 张在自己手里、另外 3 张在副露里', () => {
+    // 条文第3章第11条说的是「手牌・副露牌」都不算，所以碰出来的那三张也要算进去
+    const round = roundOf()
+    const player = round.players[1]
+    player.pon = [{ tiles: tiles('555m'), chakan: false }]
+    player.tiles = tiles('123m123s123p5m')      // 単騎 5m，但 5m 已经碰掉三张
+    const [shanten, waits] = player.calcShantenAndWaits()
+    assert.equal(shanten, 0, '还是听牌形（0 枚听牌）')
+    assert.equal(waits.length, 0, `可抽的听牌张：${JSON.stringify(waits)}`)
+  })
+
+  it('副露吃掉一部分的听牌张只算剩下的', () => {
+    const round = roundOf()
+    const player = round.players[1]
+    // 碰 5m + 手牌 456m 123m 34m 99m：等 2m/5m，但 5m 是第四张（碰里三张 + 手牌一张），只剩 2m
+    player.pon = [{ tiles: tiles('555m'), chakan: false }]
+    player.tiles = tiles('456m123m34m99m')
+    const [shanten, waits] = player.calcShantenAndWaits()
+    assert.equal(shanten, 0)
+    assert.deepEqual(waits, [{ suit: 'man', rank: 2 }])
+  })
+
+  it('暗槓里的牌也算自己这边用掉的（不再报幽灵听牌）', () => {
+    const round = roundOf()
+    const player = round.players[1]
+    // 暗槓 5m 之后手牌 34m 等 2m/5m：5m 四张全在暗槓里，实际只剩 2m
+    player.ankan = [tiles('5555m')]
+    player.tiles = tiles('34m123s123p99p')
+    const [shanten, waits] = player.calcShantenAndWaits()
+    assert.equal(shanten, 0)
+    assert.deepEqual(waits, [{ suit: 'man', rank: 2 }])
+  })
+
   it('暴力法交叉验证（随机手牌）', () => {
     let state = 20240924
     const rnd = () => (state = (Math.imul(state, 1103515245) + 12345) & 0x7fffffff) / 0x7fffffff

@@ -137,7 +137,7 @@ describe('规则档（profile）', () => {
 
   it('majsoul 档整套生效；要改就在 profile 上铺开改', () => {
     const ms = new Mahjong({ profile: majsoul }).profile
-    assert.ok(ms.multipleRon && ms.doubleYakuman && ms.kazoeYakuman && ms.abortiveDraws && ms.bustEndsGame)
+    assert.ok(ms.multipleRon && ms.doubleYakuman && ms.kazoeYakuman && ms.abortiveDraws && ms.bustEndsGame && ms.suddenDeath)
     assert.ok(ms.zeroWaitTenpai && ms.riichiNeedsFourTiles && ms.kokushiAnkanChankan)
     assert.ok(ms.pao && ms.kuidashiTanyao && ms.kiriageMangan && ms.redFives === 3, '和 M.League 相同的项不变')
     const mixed = new Mahjong({ profile: { ...majsoul, kiriageMangan: false, redFives: 0 } }).profile
@@ -147,7 +147,7 @@ describe('规则档（profile）', () => {
     assert.equal(mixed.nagashiMangan, majsoul.nagashiMangan, '没动的项保持原样')
   })
 
-  it('两档都是完整的规则清单（13 个开关都在）', () => {
+  it('两档都是完整的规则清单（14 个开关都在）', () => {
     assert.ok(ruleKeys.every(key => key in mLeague && key in majsoul), '两档都要有全部开关')
   })
 })

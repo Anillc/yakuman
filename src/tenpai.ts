@@ -91,13 +91,18 @@ export function isAgari(counts: Counts): boolean {
   return false
 }
 
-/** 听牌张；不是听牌的手牌返回空数组（手里攥着 4 张的那种"0 张听牌"也是空数组） */
-export function waits(counts: Counts): TileKind[] {
+/**
+ * 听牌张；不是听牌的手牌返回空数组（"0 张听牌"也是空数组）。
+ * held = 自己手牌 + 副露牌（含暗槓）的张数，用来判"这一张自己这里已经没有了"——
+ * M.League 第3章第11条「自己の手牌・副露牌でアガリ牌が消去されている場合は認められない」
+ * 说的是手牌和副露牌都算，所以不能只看 counts（那是手牌）。
+ */
+export function waits(counts: Counts, held: Counts = counts): TileKind[] {
   const result: TileKind[] = []
   for (const suit of SUITS) {
     const tiles = counts[suit]
     for (let r = 0; r < tiles.length; r++) {
-      if (tiles[r] >= 4) continue          // 手里已经 4 张，不会有第 5 张
+      if (held[suit][r] >= 4) continue     // 自己这里已经 4 张，不会有第 5 张
       tiles[r]++
       if (isAgari(counts)) result.push({ suit, rank: r + 1 })
       tiles[r]--
@@ -106,7 +111,7 @@ export function waits(counts: Counts): TileKind[] {
   return sortTileKinds(result)
 }
 
-export function shanten(counts: Counts, naki: number): [number, TileKind[]] {
+export function shanten(counts: Counts, naki: number, held: Counts = counts): [number, TileKind[]] {
   const candidates: [number, TileKind[]][] = []
   if (naki === 0) {
     candidates.push(chiitoitsuShanten(counts))
@@ -114,7 +119,7 @@ export function shanten(counts: Counts, naki: number): [number, TileKind[]] {
   }
   const normal = normalShanten(counts, naki)
   // 非听牌手牌返回空（旧实现返回的是"进张"，语义含糊）
-  candidates.push([normal, normal === 0 ? waits(counts) : []])
+  candidates.push([normal, normal === 0 ? waits(counts, held) : []])
   const result = candidates.reduce((acc, x) => {
     if (acc[0] < x[0]) return acc
     if (acc[0] > x[0]) return x

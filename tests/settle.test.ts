@@ -55,7 +55,7 @@ describe('包（責任払い）', () => {
     const { mahjong, end } = paoSetup('tsumo')
     assert.equal(end.type, 'hora')
     const hora = (end as HoraEnd).hora[0]
-    assert.equal(hora.pao, 3, '责任者是 3 号')
+    assert.deepEqual(hora.pao, [3], '责任者是 3 号')
     assert.equal(hora.score, 64300, '和牌者收 64000 + 本场 300')
     assert.equal(mahjong.score[0], 25000 - 16000, '东家付字一色那份 16000')
     assert.equal(mahjong.score[2], 25000 - 8000, '另一家付 8000')
@@ -70,6 +70,111 @@ describe('包（責任払い）', () => {
     assert.equal(mahjong.score[3], 25000 - 16300, '责任者付 16000 + 本场 300')
     assert.equal(mahjong.score[0], 25000 - 48000, '放铳者付 16000 + 32000')
     assert.equal(mahjong.score[2], 25000, '旁观者不用付')
+  })
+
+  // 摆一个"0 号打出某张牌、1 号鸣它"的局面（不走牌局，直接调 Round 的鸣牌方法）
+  const callSetup = (melds: string[], hand: string, call: string, kans: string[] = []) => {
+    const round = roundOf()
+    const player = round.players[1]
+    player.pon = melds.map(meld => ({ tiles: tiles(meld), chakan: false }))
+    player.ankan = kans.map(kan => tiles(kan))
+    player.tiles = tiles(hand)
+    const tile = tiles(call)[0]
+    tile.playerId = 0
+    round.players[0].discards.push(tile)
+    round.currentId = 0
+    round.kiru = tile
+    return { round, player }
+  }
+
+  it('包由鸣牌产生：碰出来的第三种三元牌记喂牌的人', () => {
+    const { round, player } = callSetup(['555z', '666z'], '77z', '7z')
+    round.pon(1, [...player.tiles])
+    assert.deepEqual(player.pao, [{ yaku: 'daisangen', playerId: 0 }])
+  })
+
+  it('包由鸣牌产生：大明槓出来的第三种三元牌 / 第四种风牌一样要记', () => {
+    const sangen = callSetup(['555z', '666z'], '777z', '7z')
+    sangen.round.minkan(1, [...sangen.player.tiles], false)
+    assert.deepEqual(sangen.player.pao, [{ yaku: 'daisangen', playerId: 0 }], '大明槓完成大三元')
+    const kaze = callSetup(['111z', '222z', '333z'], '444z', '4z')
+    kaze.round.minkan(1, [...kaze.player.tiles], false)
+    assert.deepEqual(kaze.player.pao, [{ yaku: 'daisuushii', playerId: 0 }], '大明槓完成大四喜')
+  })
+
+  it('包由鸣牌产生：第四个槓是大明槓时记四槓子', () => {
+    const { round, player } = callSetup([], '111z', '1z', ['1111m', '2222m', '3333m'])
+    assert.equal(player.kanCount, 3, '已经有三槓')
+    round.minkan(1, [...player.tiles], false)
+    assert.equal(player.kanCount, 4)
+    assert.deepEqual(player.pao, [{ yaku: 'suukantsu', playerId: 0 }])
+  })
+
+  it('自己暗杠出来的第三种三元牌不算包（没人喂牌）', () => {
+    const round = roundOf()
+    const player = round.players[1]
+    player.pon = ['555z', '666z'].map(meld => ({ tiles: tiles(meld), chakan: false }))
+    player.tiles = tiles('7777z')
+    round.currentId = 1
+    round.ankan([...player.tiles])
+    round.establishKan()
+    assert.deepEqual(player.pao, [], '暗杠没人喂牌')
+  })
+
+  // 1 号（子）暗槓 東南西 + 明槓 北 + 单骑 1m → 大四喜和四槓子两个包同时成立
+  const doublePao = (
+    pao: { yaku: 'daisuushii' | 'suukantsu', playerId: PlayerId }[],
+    rules: Partial<RuleProfile> = {},
+    winBy: 'tsumo' | 'ron' = 'tsumo',
+  ) => {
+    const mahjong = new Mahjong({ profile: { ...defaultProfile, ...rules } })
+    const player = mahjong.round.players[1]
+    player.ankan = ['1111z', '2222z', '3333z'].map(kan => tiles(kan))
+    player.minkan = [tiles('4444z')]
+    player.tiles = tiles('1m')
+    player.pao = [...pao]
+    const result = yaku(mahjong.round, player, tiles('1m')[0], winBy === 'tsumo')
+    assert.equal(result.yaku.daisuushii, rules.doubleYakuman ? 26 : 13)
+    assert.equal(result.yaku.suukantsu, 13)
+    const before = [...mahjong.score]
+    const ctx = new MahjongContext(player, { types: new Set([winBy]), hora: result } as never)
+    if (winBy === 'tsumo') {
+      ;(mahjong as unknown as { tsumo(ctx: MahjongContext): void }).tsumo(ctx)
+    } else {
+      const disc = new Tile('man', 1, false)
+      disc.playerId = 0
+      mahjong.round.kiru = disc
+      ronKey(mahjong, [ctx])
+    }
+    return {
+      delta: mahjong.score.map((score, id) => score - before[id]),
+      hora: (mahjong.lastEnd as HoraEnd).hora[0],
+    }
+  }
+
+  it('两个包各付各的：M.League 档两门都是 13 番，各自的喂牌者出 32000', () => {
+    const { delta, hora } = doublePao([{ yaku: 'daisuushii', playerId: 3 }, { yaku: 'suukantsu', playerId: 2 }])
+    assert.deepEqual(hora.pao, [3, 2], '两个责任者都列出来')
+    assert.deepEqual(delta, [0, 64000, -32000, -32000], '3 号出大四喜、2 号出四槓子，亲不用付')
+  })
+
+  it('两个包各付各的：双倍役满档下大四喜 26 番 / 四槓子 13 番，各按各的金额出', () => {
+    const { delta } = doublePao(
+      [{ yaku: 'daisuushii', playerId: 3 }, { yaku: 'suukantsu', playerId: 2 }], { doubleYakuman: true })
+    assert.deepEqual(delta, [0, 96000, -32000, -64000], '3 号出 64000（大四喜）、2 号出 32000（四槓子）')
+  })
+
+  it('两个包是同一个责任者时，他一个人出两门', () => {
+    const { delta, hora } = doublePao([{ yaku: 'daisuushii', playerId: 3 }, { yaku: 'suukantsu', playerId: 3 }])
+    assert.deepEqual(hora.pao, [3, 3], '两门都是 3 号喂的')
+    assert.deepEqual(delta, [0, 64000, 0, -64000])
+  })
+
+  it('荣和时每门包都折半：责任者各出一半，另一半加其余部分归放铳者', () => {
+    const { delta, hora } = doublePao(
+      [{ yaku: 'daisuushii', playerId: 3 }, { yaku: 'suukantsu', playerId: 2 }], { doubleYakuman: true }, 'ron')
+    assert.deepEqual(hora.pao, [3, 2])
+    assert.deepEqual(delta, [-48000, 96000, -16000, -32000], '3 号 32000、2 号 16000 都是各自那门的折半')
   })
 })
 
@@ -135,6 +240,20 @@ describe('荒牌流局 / 流し満貫', () => {
     assert.deepEqual(mahjong.score.map((score, id) => score - before[id]), [0, 0, 0, 0], '全都不算听牌 → 没有听牌料')
   })
 
+  it('副露把听牌张用光的人也不算听牌（手牌・副露牌都算，第3章第11条）', () => {
+    const mahjong = new Mahjong()
+    const player = mahjong.round.players[1]
+    player.pon = [{ tiles: tiles('555m'), chakan: false }]
+    player.tiles = tiles('123m123s123p5m')      // 単騎 5m，但 5m 已经碰掉三张
+    player.waits = player.calcShantenAndWaits()[1]
+    for (const id of playerIds) mahjong.round.players[id].ryuukyokuMangan = false
+    mahjong.round.haiyama = []
+    const before = [...mahjong.score]
+    ;(mahjong as unknown as { mopai(): void }).mopai()
+    assert.deepEqual(mahjong.score.map((score, id) => score - before[id]), [0, 0, 0, 0], '没有听牌料')
+    assert.deepEqual((mahjong.lastEnd as { ryuukyoku: { tenpai: PlayerId[] } }).ryuukyoku.tenpai, [])
+  })
+
   it('流し満貫开着时按流局结算（只算基本点、本场棒/立直棒留在桌上）', () => {
     const dealer = draw({ nagashiMangan: true }, { mangan: [0], homba: 2, riichi: [1] })
     assert.deepEqual(dealer.delta, [12000, -5000, -4000, -4000], '庄家流满：+12000 / 各 -4000（1 号还要出立直棒）')
@@ -184,6 +303,105 @@ describe('本场与连庄', () => {
   function pick({ homba, dealer, dealerBefore }: { homba: number, dealer: PlayerId, dealerBefore: PlayerId }) {
     return [homba, dealer === dealerBefore ? 'same' : dealer === nextId(dealerBefore) ? 'next' : `?${dealer}`]
   }
+})
+
+describe('南四局（オーラス）的终局', () => {
+  // 南四局、指定分数、指定局终结果 → 整场还能不能继续
+  const oorasu = (score: number[], end: MahjongEnd) => {
+    const mahjong = new Mahjong()
+    mahjong.bakaze = 'nan'
+    mahjong.kyoku = 4
+    mahjong.score = [...score]
+    mahjong.lastEnd = end
+    return (mahjong as unknown as { canNextRound(): boolean }).canNextRound()
+  }
+  const dealerTsumo: MahjongEnd = {
+    type: 'hora',
+    hora: [{ type: 'tsumo', id: 0, score: 0, points: 2000, yaku: { fu: 30, fan: 3 } }],
+  }
+  const dealerTenpaiDraw: MahjongEnd = { type: 'ryuukyoku', ryuukyoku: { type: 'hoapai', tenpai: [0], mangan: [] } }
+
+  it('庄家是全桌最高分就不再连庄（あがりやめ）', () => {
+    assert.equal(oorasu([40000, 20000, 20000, 20000], dealerTsumo), false, '庄家自摸')
+    assert.equal(oorasu([40000, 20000, 20000, 20000], dealerTenpaiDraw), false, '庄家听牌流局')
+  })
+
+  it('并列第一也算第一', () => {
+    assert.equal(oorasu([30000, 30000, 20000, 20000], dealerTsumo), false, '和 1 号同分')
+  })
+
+  it('庄家不是第一就照常连庄', () => {
+    assert.equal(oorasu([20000, 30000, 25000, 25000], dealerTsumo), true, '庄家中游')
+    assert.equal(oorasu([20000, 30000, 25000, 25000], dealerTenpaiDraw), true)
+    assert.equal(oorasu([10000, 30000, 30000, 30000], dealerTsumo), true, '庄家垫底也照打')
+  })
+
+  it('闲家和了 / 荒牌流局庄家不聴是轮庄结束，和最高分是谁无关', () => {
+    const childWin: MahjongEnd = {
+      type: 'hora',
+      hora: [{ type: 'ron', id: 1, score: 0, points: 1000, yaku: { fu: 30, fan: 1 } }],
+    }
+    assert.equal(oorasu([40000, 20000, 20000, 20000], childWin), false)
+    const childTenpaiDraw: MahjongEnd = { type: 'ryuukyoku', ryuukyoku: { type: 'hoapai', tenpai: [1], mangan: [] } }
+    assert.equal(oorasu([40000, 20000, 20000, 20000], childTenpaiDraw), false)
+  })
+})
+
+describe('西入（サドンデス）', () => {
+  // 南四 / 西四局、指定分数、指定局终结果 → 整场还能不能继续（能继续就顺手推进一局看落在哪）
+  const ending = (
+    rules: Partial<RuleProfile>, score: number[], at: { bakaze: 'nan' | 'sha', kyoku: number }, end: MahjongEnd,
+  ) => {
+    const mahjong = new Mahjong({ profile: { ...defaultProfile, ...rules } })
+    mahjong.bakaze = at.bakaze
+    mahjong.kyoku = at.kyoku
+    mahjong.score = [...score]
+    mahjong.lastEnd = end
+    const canContinue = (mahjong as unknown as { canNextRound(): boolean }).canNextRound()
+    const advanced = canContinue ? (mahjong as unknown as { nextRound(): boolean }).nextRound() : false
+    return { canContinue, advanced, mahjong }
+  }
+  const childWin: MahjongEnd = {
+    type: 'hora',
+    hora: [{ type: 'ron', id: 1, score: 0, points: 1000, yaku: { fu: 30, fan: 1 } }],
+  }
+  const childTenpaiDraw: MahjongEnd = { type: 'ryuukyoku', ryuukyoku: { type: 'hoapai', tenpai: [1], mangan: [] } }
+
+  it('M.League（没有西入）：南四打完没人到 30000 也收官', () => {
+    assert.equal(ending({}, [26000, 25000, 25000, 24000], { bakaze: 'nan', kyoku: 4 }, childWin).canContinue, false)
+  })
+
+  it('开了西入：南四打完没人到 30000 就接着打西场', () => {
+    const { canContinue, advanced, mahjong } =
+      ending({ suddenDeath: true }, [26000, 25000, 25000, 24000], { bakaze: 'nan', kyoku: 4 }, childWin)
+    assert.equal(canContinue, true)
+    assert.equal(advanced, true)
+    assert.equal(mahjong.bakaze, 'sha', '进西场')
+    assert.equal(mahjong.kyoku, 1, '从西一局开始')
+  })
+
+  it('开了西入：南四打完已经有人到 30000 就直接收官', () => {
+    const at = { bakaze: 'nan' as const, kyoku: 4 }
+    assert.equal(ending({ suddenDeath: true }, [30000, 25000, 25000, 24000], at, childWin).canContinue, false)
+  })
+
+  it('西场里有人到 30000 点以上就终局，没人到就继续（30000 整也算）', () => {
+    const west1 = { bakaze: 'sha' as const, kyoku: 1 }
+    assert.equal(ending({ suddenDeath: true }, [30000, 25000, 25000, 24000], west1, childWin).canContinue, false)
+    assert.equal(ending({ suddenDeath: true }, [29900, 25000, 25000, 24000], west1, childWin).canContinue, true)
+  })
+
+  it('不会北入：西四庄家没连庄就收官', () => {
+    const west4 = { bakaze: 'sha' as const, kyoku: 4 }
+    assert.equal(ending({ suddenDeath: true }, [25000, 25000, 25000, 25000], west4, childTenpaiDraw).canContinue, false)
+  })
+
+  it('被飞（箱割れ）：开关打开才结束半庄，M.League 打到最终局', () => {
+    const busted = [26900, -1000, 25000, 24100]
+    const nan4 = { bakaze: 'nan' as const, kyoku: 4 }
+    assert.equal(ending({ suddenDeath: true, bustEndsGame: true }, busted, nan4, childWin).canContinue, false)
+    assert.equal(ending({ suddenDeath: true, bustEndsGame: false }, busted, nan4, childWin).canContinue, true)
+  })
 })
 
 describe('立直棒的账', () => {

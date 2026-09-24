@@ -108,8 +108,10 @@ export type MahjongEnd = HoraEnd | RyuukyokuEnd
 export interface HoraEnd {
   type: 'hora'
   // 和牌者（可多家）：和牌结果（役与基本点）加上这一家实际收/付的点数
-  // pao = 包（責任払い）时喂牌的责任者；责任只承担被鸣确定的那手役满，其余照常结算
-  hora: ({ type: 'tsumo' | 'ron', id: PlayerId, score: number, pao?: PlayerId } & HoraResult)[]
+  // pao = 包（責任払い）时喂牌的责任者：每门被鸣确定的役满各算各的，责任者只承担自己那门，
+  // 其余（没被包的役满 + 普通役）照常结算。没被包就没有这个字段；
+  // 多门同时被包（例：大四喜 + 四槓子）时责任者可能不止一个，各付各的
+  hora: ({ type: 'tsumo' | 'ron', id: PlayerId, score: number, pao?: PlayerId[] } & HoraResult)[]
 }
 
 export interface RyuukyokuEnd {
@@ -379,13 +381,13 @@ export class Mahjong {
     return ctx.hora
   }
 
-  // 包（責任払い）：这一手是被包的役满时，给出「哪门役满、值几番、谁喂的」。
-  // 关掉包、或者这一手没被包，就是 null（责任者是谁仍然记在 player.pao 里）
-  private paoOf(ctx: MahjongContext, hora: HoraResult): { yaku: PaoYaku, fan: number, playerId: PlayerId } | null {
-    if (!this.profile.pao) return null
-    const entry = ctx.player.pao.find(entry => hora.yaku[entry.yaku])
-    const fan = entry && hora.yaku[entry.yaku]
-    return fan ? { ...entry, fan } : null
+  // 包（責任払い）：这一手命中的包，给出每门被鸣确定的役满「值几番、谁喂的」。
+  // 关掉包、或者这一手没被包就是空数组；多门同时命中时都列出来（各付各的，见 ron / tsumo）
+  private paoList(ctx: MahjongContext, hora: HoraResult): { yaku: PaoYaku, fan: number, playerId: PlayerId }[] {
+    if (!this.profile.pao) return []
+    return ctx.player.pao
+      .filter(entry => !!hora.yaku[entry.yaku])
+      .map(entry => ({ ...entry, fan: hora.yaku[entry.yaku]! }))
   }
 
   // 手切：只能打手牌里原有的牌（不收牌值，必须传手牌里那张 Tile 对象，
@@ -502,24 +504,24 @@ export class Mahjong {
       const hora = this.hora(ctx)
       // 荣和时一家该付多少：庄家 6a、闲家 4a，向上取整到百点
       const ronPay = (points: number) => Math.ceil((oya ? 6 : 4) * points / 100) * 100
-      // 包（責任払い）：责任者只承担被鸣确定的那手役满，其余（双倍役满以上时的其它役满）
-      // 按普通荣和算，全由放铳者出
-      const pao = this.paoOf(ctx, hora)
-      const payer = pao?.playerId ?? furikomi
-      // 被包的那手役满单独值多少（没有包时是 0，整手都算「其余部分」）
-      // 被包的那手役满单独值多少基本点（开双倍役满时大四喜算 2 倍役满）
-      const paoPart = pao === null ? 0 : ronPay(basicPoints(pao.fan, hora.yaku.fu))
-      const restPart = ronPay(hora.points) - paoPart
+      // 包（責任払い）：各包各的 —— 每一门被鸣确定的役满单独值多少基本点（开双倍役满时大四喜算 2 倍役满），
+      // 由喂出那一门牌的人付；其余（没被包的役满 + 普通役）按普通荣和算，全由放铳者出
+      const paoList = this.paoList(ctx, hora)
       let score = ronPay(hora.points)
-      if (pao === null || pao.playerId === furikomi) {
-        // 鸣牌的人自己放铳：全付
-        this.score[payer] -= score
-      } else {
+      // 放铳者要出的部分：整手先都算在他头上，再把每门包里责任者承担的那一半扣掉
+      let fromFurikomi = score
+      for (const pao of paoList) {
+        const part = ronPay(basicPoints(pao.fan, hora.yaku.fu))
+        // 喂牌的人自己放铳：那一门整门都他出，已经算在 fromFurikomi 里了
+        if (pao.playerId === furikomi) continue
         // 包 + 别家放铳 → 被鸣确定的那手役满折半（M.League 第8章第1条「別の放銃者がいたら折半払い」）
-        const half = Math.ceil(paoPart / 2 / 100) * 100
+        const half = Math.ceil(part / 2 / 100) * 100
         this.score[pao.playerId] -= half
-        this.score[furikomi] -= (paoPart - half) + restPart
+        fromFurikomi -= half
       }
+      this.score[furikomi] -= fromFurikomi
+      // 本场棒也由喂牌的人出：多门包时由第一个责任者出（和自摸一致）
+      const payer = paoList[0]?.playerId ?? furikomi
       // 场供（本场棒 + 桌上的立直棒）按頭ハネ算：多响时也只有离放铳者最近的那家收
       if (closestWinner === ctx.player.id) {
         // 本场棒由放铳者（被包时就是责任者）出，和自摸一样每家 100 点
@@ -538,7 +540,7 @@ export class Mahjong {
         type: 'ron',
         id: ctx.player.id,
         score,
-        ...pao !== null ? { pao: pao.playerId } : {},
+        ...paoList.length !== 0 ? { pao: paoList.map(pao => pao.playerId) } : {},
       })
       this.score[ctx.player.id] += score
     }
@@ -555,10 +557,12 @@ export class Mahjong {
     // 自摸时一家该付多少：庄家 2a、闲家 a；庄家自摸时三家都付 2a；各自向上取整到百点
     const tsumoPay = (points: number, id: PlayerId) =>
       Math.ceil((oya || this.round.players[id].isDealer ? 2 : 1) * points / 100) * 100
-    // 包（責任払い）：责任者一个人出被鸣确定的那手役满（自摸＝責任払い），
-    // 其余（双倍役满以上时的其它役满）按普通自摸分摊，本场棒也由责任者出
-    const pao = this.paoOf(ctx, hora)
-    const paoPart = pao === null ? 0 : basicPoints(pao.fan, hora.yaku.fu)
+    // 包（責任払い）：各包各的 —— 每一门被鸣确定的役满都由喂出那一门牌的人一个人出（自摸＝責任払い），
+    // 其余（没被包的役满 + 普通役）按普通自摸分摊。本场棒由第一个责任者出
+    const paoList = this.paoList(ctx, hora)
+    const paoPay = (points: number) => playerIds.reduce<number>((acc, id) =>
+      id === ctx.player.id ? acc : acc + tsumoPay(points, id), 0)
+    const paoPart = paoList.reduce((sum, pao) => sum + basicPoints(pao.fan, hora.yaku.fu), 0)
     const restPart = hora.points - paoPart
     let score = 0
     for (const id of playerIds) {
@@ -568,16 +572,15 @@ export class Mahjong {
       }
       if (id === ctx.player.id) continue
       // 没包就是整手；有包就只分摊除了被鸣那手役满以外的部分
-      const pay = tsumoPay(pao === null ? hora.points : restPart, id)
-      this.score[id] -= pao === null ? pay + 100 * this.homba : pay
+      const pay = tsumoPay(paoList.length === 0 ? hora.points : restPart, id)
+      this.score[id] -= paoList.length === 0 ? pay + 100 * this.homba : pay
       score += pay
     }
-    if (pao !== null) {
-      // 被鸣确定的那手役满按自摸收多少（三家各付 2a/a），全由责任者出，本场棒也归他
-      const paoPay = playerIds.reduce<number>((acc, id) =>
-        id === ctx.player.id ? acc : acc + tsumoPay(paoPart, id), 0)
-      this.score[pao.playerId] -= paoPay + 300 * this.homba
-      score += paoPay
+    for (const [index, pao] of paoList.entries()) {
+      // 被鸣确定的那门役满按自摸收多少（三家各付 2a/a），全由它的责任者出
+      const part = paoPay(basicPoints(pao.fan, hora.yaku.fu))
+      this.score[pao.playerId] -= part + (index === 0 ? 300 * this.homba : 0)
+      score += part
     }
     // 供托（本场棒 + 桌上立直棒 + 本局立直棒）
     score += this.homba * 300 + (this.riichibo + this.round.players.filter(player => player.riichi).length) * 1000
@@ -589,7 +592,7 @@ export class Mahjong {
         type: 'tsumo',
         id: ctx.player.id,
         score,
-        ...pao !== null ? { pao: pao.playerId } : {},
+        ...paoList.length !== 0 ? { pao: paoList.map(pao => pao.playerId) } : {},
       }],
     })
   }
@@ -725,20 +728,23 @@ export class Mahjong {
     if (this.profile.bustEndsGame && this.score.some(score => score < 0)) {
       return false
     }
-    // 西入后只要有人分数超过 30000 则结束
-    if (this.bakaze === 'sha' && this.score.some(score => score > 30000)) {
-      return false
-    }
-    // 南四局庄家垫底（其他三家都比庄家分高）就不打了
-    if (this.bakaze === 'nan' && this.kyoku === 4) {
+    // 南四局（オーラス）本来是连庄局（亲和了 / 亲听牌流局），而庄家已经是全桌最高分（并列第一也算）
+    // 就不再连庄、直接终局（あがりやめ）。庄家不是第一照常连庄；本来就不连庄的收官局走下面那条
+    if (this.bakaze === 'nan' && this.kyoku === 4 && this.oyaRepeats()) {
       const dealerScore = this.score[this.round.dealer]
-      if (playerIds.every(id => this.round.players[id].isDealer || this.score[id] > dealerScore)) {
+      if (playerIds.every(id => this.score[id] <= dealerScore)) {
         return false
       }
     }
-    // 西、南四局如果是闲家和牌（庄家没连庄）则结束（不会北入）
-    if (['nan', 'sha'].includes(this.bakaze) && this.kyoku === 4 && !this.oyaRepeats()) {
+    // 西入（サドンデス）：进了西场之后谁先到 30000 点以上，这一局打完就终局
+    if (this.profile.suddenDeath && this.bakaze === 'sha' && this.score.some(score => score >= 30000)) {
       return false
+    }
+    // 最终局（南四 / 西四）庄家没连庄就是收官局：
+    // 没开西入时南四打完就结束（M.League 打满东场 + 南场，不会北入）；
+    // 开了西入（雀魂）时南四打完还没人到 30000 点就继续打西场，西四庄家没连庄同样收官
+    if (['nan', 'sha'].includes(this.bakaze) && this.kyoku === 4 && !this.oyaRepeats()) {
+      return this.bakaze === 'nan' && this.profile.suddenDeath && !this.score.some(score => score >= 30000)
     }
     return true
   }

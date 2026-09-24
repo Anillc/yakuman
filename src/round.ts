@@ -2,7 +2,7 @@
 // M.League 公式戦ルール：https://m-league.jp/about （页面里的 rule 段，第1〜9章）
 // 规则开关与整套规则档见 profile.ts
 import { shanten, waits } from './tenpai.js'
-import { MahjongError, TileKind, compareTileKind, createEmptyCounts, group, nextId, shuffle, toMPSZ, toTileKinds, uniqTileKinds } from './utils.js'
+import { Counts, MahjongError, TileKind, cloneCounts, compareTileKind, createEmptyCounts, group, nextId, shuffle, toMPSZ, toTileKinds, uniqTileKinds } from './utils.js'
 import { HoraResult, canHora, yaku } from './yaku.js'
 import { RuleProfile, defaultProfile } from './profile.js'
 
@@ -291,12 +291,7 @@ export class Round {
       chakan: false,
     })
     player.kuikae = [{ suit: called.suit, rank: called.rank }]
-    // 包：三種類目の三元牌 / 四種類目の風牌を鳴らせた人が責任者
-    const kotsu = (suit: Suit) => player.pon.filter(pon => pon.tiles[0].suit === suit).length
-      + player.minkan.filter(tiles => tiles[0].suit === suit).length
-      + player.ankan.filter(tiles => tiles[0].suit === suit).length
-    if (kotsu('sangen') === 3) player.pao.push({ yaku: 'daisangen', playerId: discarder })
-    if (kotsu('kaze') === 4) player.pao.push({ yaku: 'daisuushii', playerId: discarder })
+    this.registerPao(player, discarder, { suit: called.suit, kan: false })
     this.currentId = id
     this.breakFirstTurnFlags()
     this.removeRyuukyokuMangan(discarder)
@@ -319,10 +314,30 @@ export class Round {
     const discarder = this.discarder
     if (drawRinshan) this.mopai(true, id, true)
     this.kanCount++
-    // 包：四つ目の槓が明槓なら、その牌を切った人が責任者
-    if (this.kanCount === 4) player.pao.push({ yaku: 'suukantsu', playerId: discarder })
+    this.registerPao(player, discarder, { suit: tiles[0].suit, kan: true })
     this.breakFirstTurnFlags()
     this.removeRyuukyokuMangan(discarder)
+  }
+
+  // 包（責任払い）：大三元 / 大四喜 / 四槓子 被鸣确定的那一刻，记下喂牌的责任者。
+  // M.League 第8章第1条把「三種類目の三元牌」「四種類目の風牌」「四つ目の槓」都写成「ポン（大明槓）」，
+  // 所以碰和明槓都要判（暗杠、加杠没人喂牌，不算包）。
+  // melded 是"刚鸣进来的这一组"：只有它正好补成第三种三元牌 / 第四种风牌 / 第四槓 才算确定，
+  // 不然之后随便再碰一张都会把已经成形的役满重新记一次包
+  private registerPao(player: Player, discarder: PlayerId, melded: { suit: Suit, kan: boolean }) {
+    const kotsu = (suit: Suit) => player.pon.filter(pon => pon.tiles[0].suit === suit).length
+      + player.minkan.filter(tiles => tiles[0].suit === suit).length
+      + player.ankan.filter(tiles => tiles[0].suit === suit).length
+    if (melded.suit === 'sangen' && kotsu('sangen') === 3) {
+      player.pao.push({ yaku: 'daisangen', playerId: discarder })
+    }
+    if (melded.suit === 'kaze' && kotsu('kaze') === 4) {
+      player.pao.push({ yaku: 'daisuushii', playerId: discarder })
+    }
+    // 四槓子看这一家自己的槓数（加杠记在 pon 里，player.kanCount 会算上），不是全场第 4 个槓
+    if (melded.kan && player.kanCount === 4) {
+      player.pao.push({ yaku: 'suukantsu', playerId: discarder })
+    }
   }
 
   // 暗杠与加杠都先"预备"，等一圈没人抢杠才算成立（establishKan），所以这里不加杠计数、
@@ -417,7 +432,9 @@ export class Round {
           const riichiAnkan = ankan.filter(tiles => {
             const counts = group(this.players[id].tiles)
             counts[tiles[0].suit][tiles[0].rank - 1] -= 4
-            const waitsAfter = waits(counts)
+            // 杠前杠后要用同一套「自己手牌 + 副露」的表算听牌张，不然被副露用掉的那张牌在
+            // 前后会判得不一致，合法的立直中暗杠会被误拦
+            const waitsAfter = waits(counts, this.players[id].heldCounts(counts))
             return waitsBefore.length === waitsAfter.length
               && waitsBefore.every(wait => waitsAfter.some(other => compareTileKind(wait, other) === 0))
           })
@@ -596,7 +613,20 @@ export class Player {
     tiles ||= this.tiles
     const counts = group(tiles)
     const naki = this.naki + this.ankan.length
-    return shanten(counts, naki)
+    return shanten(counts, naki, this.heldCounts(counts))
+  }
+
+  // 自己这边还剩几张：手牌 counts + 副露（吃 / 碰 / 明槓）+ 暗槓的牌（第3章第11条说的是「手牌・副露牌」）。
+  // isAgari 只看手牌形状，不知道副露和暗槓里有哪些牌，不补上就会报幽灵听牌
+  // （例：暗槓 5m + 手牌 34m 会说还在等 5m，其实第 5 张根本不存在）。
+  // 暗槓不是副露（第4章第6条「暗槓は副露の対象とはならない」），但它同样是自己的牌，一样要算
+  heldCounts(hand: Counts): Counts {
+    const held = cloneCounts(hand)
+    const melds = [...this.chi, ...this.pon.map(pon => pon.tiles), ...this.minkan, ...this.ankan]
+    for (const tiles of melds) {
+      for (const tile of tiles) held[tile.suit][tile.rank - 1]++
+    }
+    return held
   }
 
   // 打每张牌之后的向听（含未听牌的切法），按需计算
