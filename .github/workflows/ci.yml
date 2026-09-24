@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: |
+          corepack enable
+          yarn install --immutable
+          yarn typecheck && yarn test
+          yarn build
+      - id: version
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+          ELIGIBLE: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master') }}
+        run: |
+          current=$(jq -r .version package.json)
+          test -n "$current" -a "$current" != null
+          previous=
+          changed=false
+          if [[ "$ELIGIBLE" == "true" ]]; then
+            if [[ "$EVENT" == "workflow_dispatch" ]]; then
+              changed=true
+            else
+              previous=$(git show "$BEFORE_SHA:package.json" 2>/dev/null | jq -r .version) || previous=
+              if [[ -n "$previous" && "$previous" != "$current" ]]; then
+                changed=true
+              fi
+            fi
+          fi
+          printf 'changed=%s\nversion=%s\n' "$changed" "$current" >> "$GITHUB_OUTPUT"
+          echo "version: ${previous:-(unknown)} -> $current (publish=$changed)"
+      - if: steps.version.outputs.changed == 'true'
+        run: yarn npm publish --provenance
