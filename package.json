@@ -15,7 +15,7 @@
     "lib"
   ],
   "repository": "https://github.com/Anillc/yakuman.git",
-  "author": "Anillc <void@anillc.cn>",
+  "author": "Anillc <void@anil.lc>",
   "license": "MIT",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

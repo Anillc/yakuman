@@ -10,7 +10,6 @@ export type MahjongErrorCode =
   | 'not-candidate'
   | 'riichi-not-tenpai'
   | 'kuikae'
-  | 'prompt-done'
   | 'out-of-order'
   | 'no-round-end'
   | 'unreachable'

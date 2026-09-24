@@ -2,10 +2,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
-  Mahjong, MahjongContext, Tile, defaultProfile, mLeague, majsoul, mergeProfile, playerIds, ruleKeys,
+  Mahjong, MahjongContext, Tile, defaultProfile, mLeague, majsoul, ruleKeys,
 } from '../src/index.js'
 import { MahjongErrorCode } from '../src/utils.js'
-import { drive, roundOf, seededWall, simpleBot, tiles } from './helpers.js'
+import { canonicalWall, drive, hand, roundOf, seededWall, simpleBot, tiles } from './helpers.js'
 
 const expectThrow = (code: MahjongErrorCode, action: () => void) => {
   try {
@@ -35,7 +35,7 @@ describe('Prompt 的守卫', () => {
         const ghost = new Tile("so", 1, false)
         expectThrow('tile-not-in-hand', () => step.apply(slot.ctx, { action: 'tedashi', tile: ghost }))
       }
-      // 答了一格之后，同一格再答 → prompt-done 或者顺序错
+      // 答了一格
       const decision = slot.ctx.types.has('tsumogiri') ? { action: 'tsumogiri' as const } : { action: 'pass' as const }
       step.apply(slot.ctx, decision)
       assert.equal(mahjong.round.players.flatMap(player => player.tiles).length, before,
@@ -44,15 +44,63 @@ describe('Prompt 的守卫', () => {
     }
   })
 
-  it('这一圈答完之后再答 → prompt-done', async () => {
+  it('这一圈定案之后再提交剩下的格子 → 空操作，返回 true，牌局不变', async () => {
     const mahjong = new Mahjong({ createTiles: () => seededWall(2) })
     for await (const step of mahjong.steps()) {
       if (step.type !== 'prompt') continue
       const slot = step.current!
-      step.apply(slot.ctx, { action: 'tsumogiri' })
-      expectThrow('prompt-done', () => step.apply(slot.ctx, { action: 'tsumogiri' }))
+      const before = mahjong.round.players.flatMap(player => player.tiles).length
+      assert.equal(step.apply(slot.ctx, { action: 'tsumogiri' }), true, '这一圈定了')
+      assert.equal(step.current, null)
+      // 已经定案：同一圈的任何提交都是空操作，照样返回 true
+      assert.equal(step.apply(slot.ctx, { action: 'tsumogiri' }), true)
+      assert.equal(mahjong.round.players.flatMap(player => player.tiles).length, before, '空操作没有动牌')
       break
     }
+  })
+
+  it('同一家有两格（荣和 + 碰）时可以乱序回答，但结算仍按优先级', async () => {
+    // 0 号打 9s；1 号手里 99s + 听 9s（单骑），所以既能荣和 9s 也能碰 9s
+    const wall = canonicalWall()
+    const hands = [
+      hand('9s19m19p11234567z', wall),
+      hand('99s123m456m222z55p', wall),
+      hand('123456789m1234p', wall),
+      hand('1122334455667p', wall),
+    ]
+    const mahjong = new Mahjong({ createTiles: () => [...hands.flat(), ...wall] })
+    let discarded = false
+    for await (const step of mahjong.steps()) {
+      if (step.type === 'roundEnd') break
+      const slots = step.slots
+      const ron = slots.find(slot => slot.ctx.player.id === 1 && slot.phase === 'ron')
+      const claim = slots.find(slot => slot.ctx.player.id === 1 && slot.phase === 'claim')
+      if (ron && claim) {
+        assert.deepEqual(slots.filter(slot => slot.ctx.player.id === 1).map(slot => slot.phase), ['ron', 'claim'])
+        // 故意先答"碰"，再答"荣和"：容和优先，碰应该被丢掉
+        step.apply(claim.ctx, { action: 'pon', candidate: claim.ctx.ponTiles![0] })
+        step.apply(ron.ctx, { action: 'ron' })
+        const end = await (async () => {
+          for await (const rest of mahjong.steps()) if (rest.type === 'roundEnd') return rest.end
+        })()
+        assert.equal(end?.type, 'hora')
+        assert.equal((end as { hora: { id: number }[] }).hora[0].id, 1, '荣和的那家')
+        assert.equal(mahjong.round.players[1].pon.length, 0, '碰被荣和盖掉，没有生效')
+        return
+      }
+      for (let slot = step.current; slot !== null; slot = step.current) {
+        const ctx = slot.ctx
+        if (ctx.types.has('tedashi') && ctx.player.id === 0 && !discarded) {
+          discarded = true
+          const tile = ctx.player.tiles.find(candidate => candidate.suit === 'so' && candidate.rank === 9)!
+          if (step.apply(ctx, { action: 'tedashi', tile })) break
+          continue
+        }
+        const decision = ctx.types.has('tsumogiri') ? { action: 'tsumogiri' as const } : { action: 'pass' as const }
+        if (step.apply(ctx, decision)) break
+      }
+    }
+    assert.fail('没遇到 1 号既能荣和又能碰的那一圈')
   })
 
   it('食い替え：刚碰进来的那张不能马上打', () => {
@@ -87,21 +135,19 @@ describe('规则档（profile）', () => {
     assert.deepEqual({ ...new Mahjong().profile }, { ...mLeague })
   })
 
-  it('majsoul 档整套生效、单独传的开关覆盖它', () => {
+  it('majsoul 档整套生效；要改就在 profile 上铺开改', () => {
     const ms = new Mahjong({ profile: majsoul }).profile
     assert.ok(ms.multipleRon && ms.doubleYakuman && ms.kazoeYakuman && ms.abortiveDraws && ms.bustEndsGame)
     assert.ok(ms.zeroWaitTenpai && ms.riichiNeedsFourTiles && ms.kokushiAnkanChankan)
     assert.ok(ms.pao && ms.kuidashiTanyao && ms.kiriageMangan && ms.redFives === 3, '和 M.League 相同的项不变')
-    const mixed = new Mahjong({ profile: majsoul, kiriageMangan: false, redFives: 0 }).profile
+    const mixed = new Mahjong({ profile: { ...majsoul, kiriageMangan: false, redFives: 0 } }).profile
     assert.equal(mixed.kiriageMangan, false)
     assert.equal(mixed.redFives, 0)
     assert.equal(mixed.multipleRon, true, '档里其余项仍然生效')
+    assert.equal(mixed.nagashiMangan, majsoul.nagashiMangan, '没动的项保持原样')
   })
 
-  it('mergeProfile：后面的覆盖前面的，undefined 不算数', () => {
-    assert.equal(mergeProfile(mLeague, { kazoeYakuman: true }).kazoeYakuman, true)
-    assert.equal(mergeProfile(majsoul, { kazoeYakuman: false }).kazoeYakuman, false)
-    assert.equal(mergeProfile().pao, mLeague.pao)
+  it('两档都是完整的规则清单（13 个开关都在）', () => {
     assert.ok(ruleKeys.every(key => key in mLeague && key in majsoul), '两档都要有全部开关')
   })
 })
@@ -121,4 +167,3 @@ describe('一局的收尾', () => {
     assert.equal(new Mahjong({ profile: majsoul }).profile.bustEndsGame, true)
   })
 })
-

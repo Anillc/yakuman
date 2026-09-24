@@ -2,13 +2,12 @@
 // 库自带两档：mLeague（默认，逐条对着 M.League 官方规则写的）和 majsoul（雀魂四人段位戦）。
 // M.League 条文原文：https://m-league.jp/about （rule 段，第1〜9章）
 //
-//   new Mahjong()                                  // = mLeague
-//   new Mahjong({ profile: majsoul })               // 整套换掉
-//   new Mahjong({ profile: { ...majsoul, kazoeYakuman: false } })   // 基于某档改几项
-//   new Mahjong({ profile: mLeague, kazoeYakuman: true })           // 单个开关放在最外层会覆盖 profile
+//   new Mahjong()                                                    // = mLeague
+//   new Mahjong({ profile: majsoul })                                 // 整套换掉
+//   new Mahjong({ profile: { ...majsoul, kazoeYakuman: false } })     // 基于某档改几项
 //
-// 新增开关时：往 RuleProfile 加字段 + 在 mLeague 里写默认值和条文出处。
-// 其它档为了当"规则清单"看，13 项都显式写出来（类型会强制写全），不靠 ... 铺开。
+// 要改规则就在 profile 上改（想省事就 ... 某一档再覆盖几项），库不做额外的合并/覆盖。
+// 新增开关时：往 RuleProfile 加字段 + 在每一档里都写明（类型会强制写全），并在 mLeague 里标条文出处。
 //
 // 还没进 profile 的（都还没实现，等做了再加字段）：順位点/ウマ（第6章第2条）和罚则（第7章）。
 export interface RuleProfile {
@@ -109,18 +108,4 @@ export const majsoul: RuleProfile = {
   riichiNeedsFourTiles: true,
   // 国士无双可以抢暗杠
   kokushiAnkanChankan: true,
-}
-
-// 把若干档叠起来：后面的覆盖前面的，没写的（undefined）不算数。第一层永远是 defaultProfile（= mLeague）。
-// 只认 RuleProfile 里的键，别的（比如 createTiles）会被忽略
-export function mergeProfile(...profiles: (Partial<RuleProfile> | undefined)[]): RuleProfile {
-  const result: RuleProfile = { ...defaultProfile }
-  for (const profile of profiles) {
-    if (!profile) continue
-    for (const key of ruleKeys) {
-      const value = profile[key]
-      if (value !== undefined) (result as Record<keyof RuleProfile, unknown>)[key] = value
-    }
-  }
-  return result
 }
