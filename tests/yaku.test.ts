@@ -59,6 +59,10 @@ describe('门清的役', () => {
     { hand: '11234567m111z88m', win: '1m', want: { honitsu: 3, bakaze: 1, jikaze: 1 } },
     { hand: '123456789m2345m', win: '5m', want: { chinitsu: 6, ittsuu: 2 } },
     { hand: '555z666z77z111m22p', win: '2p', want: { shousangen: 2, white: 1, green: 1 } },
+    { hand: '111m222m333m11z22z', win: '1z', want: { toitoi: 2, sanankou: 2, bakaze: 1, jikaze: 1 } },
+    // 混老頭（副露里是 999s，免得四暗刻把普通役盖掉）
+    { hand: '111m999m11z22z', win: '1z', melds: ['999s'], want: { honroutou: 2, toitoi: 2 } },
+    { hand: '111z222z333z44z56m', win: '7m', want: { shousuushii: 13 } },
     { hand: '111m222m333m44m5s5s', win: '4m', tsumo: true, want: { suuankou: 13 } },
     { hand: '111222333444m5m', win: '5m', tsumo: true, want: { suuankouTanki: 13 } },
     { hand: '1m1m1p1p', win: '1m', melds: ['555z', '666z', '777z'], want: { daisangen: 13 } },
@@ -95,6 +99,14 @@ describe('门清的役', () => {
     const result = horaOf(roundOf(), '1133557799m112p', '2p')
     assert.equal(result.yaku.chiitoitsu, 2)
     assert.equal(result.yaku.fu, 25)
+  })
+
+  it('役满手只列役满，普通役不进结果', () => {
+    // 这手同时是 四暗刻単騎 和 混老頭 / 対々和，但役满成立时只列役满
+    const result = horaOf(roundOf(), '111m999m111p999p1z', '1z')
+    assert.equal(result.yaku.suuankouTanki, 13)
+    assert.equal(result.yaku.honroutou, undefined)
+    assert.equal(result.yaku.toitoi, undefined)
   })
 })
 
@@ -248,5 +260,56 @@ describe('一发', () => {
     const hora = yaku(round, player, true)
     assert.equal(hora.yaku.riichi, 1)
     assert.equal(hora.yaku.ippatsu, 1, '立直一発ツモ')
+  })
+})
+
+describe('天和 / 地和 / ダブル立直', () => {
+  // roundOf 会把初巡标记关掉，这里显式开回来
+  const firstTurnRound = () => {
+    const round = roundOf()
+    round.firstTurnIntact = true
+    return round
+  }
+  const winning = '234m567m234p88p78s'   // 和 9s 成 234m 567m 234p 88p 789s
+
+  it('天和：庄家第一巡自摸；过了第一巡就不算', () => {
+    const round = firstTurnRound()
+    const dealer = round.players[0]
+    dealer.tiles = tiles(winning)
+    assert.equal(yaku(round, dealer, tiles('9s')[0], true).yaku.tenhou, 13)
+    round.firstTurnIntact = false
+    assert.equal(yaku(round, dealer, tiles('9s')[0], true).yaku.tenhou, undefined)
+  })
+
+  it('地和：子家第一巡自摸（不算天和）', () => {
+    const round = firstTurnRound()
+    const child = round.players[1]
+    child.tiles = tiles(winning)
+    const hora = yaku(round, child, tiles('9s')[0], true)
+    assert.equal(hora.yaku.chiihou, 13)
+    assert.equal(hora.yaku.tenhou, undefined)
+  })
+
+  it('ダブル立直：第一巡宣言是 2 番，还能叠一发', () => {
+    // 摸到 5s 后摸切宣言：手牌是 123m 456m 789m 11s 23s（听 1s / 4s）
+    const round = firstTurnRound()
+    const player = round.players[1]
+    player.tiles = tiles('123m456m789m11s23s5s')
+    round.currentId = 1
+    round.kiru = undefined
+    round.dahai(player.tiles.find(tile => tile.suit === 'so' && tile.rank === 5)!, true)
+    assert.equal(player.riichi?.double, true, '第一巡宣言 → 双立直')
+    // 巡目走一圈（2 号、3 号、庄家各摸打一次），再到自己摸牌 —— 这样不是第一巡，
+    // 不会被地和（役满）盖掉，正好能看清双立直 + 一发
+    round.mopai(); round.dahai(round.player.drawn)
+    round.mopai(); round.dahai(round.player.drawn)
+    round.mopai(); round.dahai(round.player.drawn)
+    round.haiyama.unshift(tiles('4s')[0])
+    round.mopai()
+    const hora = yaku(round, player, true)
+    assert.equal(hora.yaku.doubleRiichi, 2)
+    assert.equal(hora.yaku.riichi, undefined)
+    assert.equal(hora.yaku.ippatsu, 1)
+    assert.equal(hora.yaku.chiihou, undefined, '已经不是第一巡')
   })
 })

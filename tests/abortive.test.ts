@@ -1,7 +1,7 @@
 // 和牌优先的途中流局：四家立直 / 四風連打 / 四槓散了 都要等这一打的吃碰杠和都没人要才成立
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { HoraEnd, Mahjong, PromptSlot, defaultProfile } from '../src/index.js'
+import { HoraEnd, Mahjong, MahjongEnd, PromptSlot, Round, defaultProfile } from '../src/index.js'
 import { canonicalWall, drive, hand, take, tiles } from './helpers.js'
 
 const profile = { ...defaultProfile, abortiveDraws: true }
@@ -123,5 +123,91 @@ describe('四槓散了', () => {
     mahjong.round.kanCount = 4
     invokeCheckKan(mahjong)
     assert.equal(mahjong.round.suukansanra, false)
+  })
+})
+
+describe('九種九牌', () => {
+  // 庄家配牌里放几种幺九牌：>= 9 种才能宣告（abortiveDraws 打开时）
+  const table = (dealerHand: string, abortiveDraws = true) => {
+    const wall = canonicalWall()
+    const hands = [
+      hand(dealerHand, wall),
+      hand('1122334455667p', wall),
+      hand('2233445566778p', wall),
+      hand('111999m111999s1p', wall),
+    ]
+    return new Mahjong({
+      profile: { ...defaultProfile, abortiveDraws },
+      createTiles: () => [...hands.flat(), ...wall],
+    })
+  }
+  const actionOf = (dealerHand: string, abortiveDraws = true) => {
+    const round = new Round('ton', 0, undefined, { ...defaultProfile, abortiveDraws })
+    round.firstTurnIntact = true
+    round.players[0].tiles = tiles(dealerHand)
+    round.currentId = 0
+    round.kiru = undefined
+    return round.action(0)!
+  }
+
+  it('种类不够或没开途中流局就不给宣告', () => {
+    assert.equal(actionOf('19m19p19s1234567z2p').types.has('ryuukyoku'), true, '13 种')
+    assert.equal(actionOf('111m19p19s112233z2p').types.has('ryuukyoku'), false, '只有 8 种')
+    assert.equal(actionOf('19m19p19s1234567z2p', false).types.has('ryuukyoku'), false, 'M.League 档没有途中流局')
+  })
+
+  it('第一巡宣告 → 中途流局（亲续投、本场 +1）', async () => {
+    const mahjong = table('19m19p19s1234567z')
+    let declared = false
+    let end: MahjongEnd | undefined
+    let nextRoundDealer: number | undefined
+    for await (const step of mahjong.steps()) {
+      if (step.type === 'roundEnd') {
+        if (end) break
+        end = step.end
+        continue                                   // 再取一个 step = 打下一局
+      }
+      if (end) { nextRoundDealer = mahjong.dealer; break }
+      for (let slot = step.current; slot !== null; slot = step.current) {
+        const ctx = slot.ctx
+        const decision = ctx.player.id === 0 && ctx.types.has('ryuukyoku')
+          ? (declared = true, { action: 'ryuukyoku' as const })
+          : ctx.types.has('tsumogiri') ? { action: 'tsumogiri' as const } : { action: 'pass' as const }
+        if (step.apply(ctx, decision)) break
+      }
+    }
+    assert.equal(declared, true, '第一巡应该给出宣告九種九牌的选项')
+    assert.deepEqual(end, { type: 'ryuukyoku', ryuukyoku: { type: 'kyuushu', id: 0 } })
+    assert.equal(mahjong.homba, 1, '中途流局也算一本场')
+    assert.equal(nextRoundDealer, 0, '亲续投：下一局还是 0 号当庄')
+  })
+})
+
+describe('四風連打', () => {
+  it('第一巡四家都打同一张风牌 → 流局', async () => {
+    const wall = canonicalWall()
+    const hands = [
+      hand('1z234m567m234p888s', wall),
+      hand('1z234m567m234p777s', wall),
+      hand('1z234m567m234p666s', wall),
+      hand('1z234m567m234p555s', wall),
+    ]
+    const mahjong = new Mahjong({
+      profile: { ...defaultProfile, abortiveDraws: true },
+      createTiles: () => [...hands.flat(), ...wall],
+    })
+    const order: number[] = []
+    const end = await drive(mahjong, slot => {
+      const ctx = slot.ctx
+      const kaze = ctx.player.tiles.find(tile => tile.suit === 'kaze' && tile.rank === 1)
+      if (kaze && ctx.types.has('tedashi')) {
+        order.push(ctx.player.id)
+        return { action: 'tedashi', tile: kaze }
+      }
+      if (ctx.types.has('tsumogiri')) return { action: 'tsumogiri' }
+      return { action: 'pass' }
+    })
+    assert.deepEqual(order, [0, 1, 2, 3], '四家按顺序各打一张東')
+    assert.deepEqual(end, { type: 'ryuukyoku', ryuukyoku: { type: 'sufurenda' } })
   })
 })

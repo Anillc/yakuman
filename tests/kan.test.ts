@@ -121,6 +121,34 @@ describe('三种杠的候选与提交', () => {
       return { action: 'pass' }
     })
   })
+
+  it('暗杠按"同一种牌"分组：赤 5 和普通 5 算同一种', () => {
+    const round = roundOf()
+    const player = round.players[0]
+    player.tiles = tiles('0555m234p567p889s')   // 0 = 赤 5
+    round.currentId = 0
+    round.kiru = undefined
+    const ankan = round.action(0)!.kans?.filter(kan => kan.type === 'ankan') ?? []
+    assert.equal(ankan.length, 1, '赤 5 + 三张普通 5 就是一组暗杠')
+    assert.equal(ankan[0].tiles.length, 4)
+    assert.equal(ankan[0].tiles.filter(tile => tile.red).length, 1, '赤牌也在这一组里')
+  })
+
+  it('加杠同样按"同一种牌"：碰了 555m 之后摸到赤 5 也能加杠', () => {
+    const round = roundOf()
+    const player = round.players[0]
+    player.pon = [{ tiles: tiles('555m'), chakan: false }]
+    player.tiles = tiles('05m234p567p889s')     // 手牌 10 张（含赤 5）
+    round.currentId = 0
+    round.kiru = undefined
+    const chakan = round.action(0)!.kans?.filter(kan => kan.type === 'chakan') ?? []
+    assert.equal(chakan.length, 1)
+    assert.equal(chakan[0].tiles[0].red, true, '候选就是手上那张赤 5')
+    round.chakan(chakan[0].tiles[0])
+    round.establishKan()
+    assert.equal(player.pon[0].chakan, true)
+    assert.equal(player.pon[0].tiles.length, 4, '碰升级成 4 张')
+  })
 })
 
 describe('抢杠', () => {

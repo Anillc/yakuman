@@ -229,3 +229,83 @@ describe('一局的收尾', () => {
     assert.equal(new Mahjong({ profile: majsoul }).profile.bustEndsGame, true)
   })
 })
+
+describe('打牌入口与动作守卫', () => {
+  it('手切刚摸到的那张 → tedashi-drawn-tile（要改用摸切）', async () => {
+    const mahjong = new Mahjong({ createTiles: () => seededWall(11) })
+    for await (const step of mahjong.steps()) {
+      if (step.type !== 'prompt') continue
+      const slot = step.current!
+      if (!slot.ctx.types.has('tsumogiri')) continue
+      expectThrow('tedashi-drawn-tile', () =>
+        step.apply(slot.ctx, { action: 'tedashi', tile: slot.ctx.player.drawn }))
+      return
+    }
+    assert.fail('没遇到刚摸完牌的局面')
+  })
+
+  it('候选不在候选列表里 → not-candidate', async () => {
+    const mahjong = new Mahjong({ createTiles: () => seededWall(31) })
+    const bot = simpleBot(mahjong, 31, 0.6)
+    for await (const step of mahjong.steps()) {
+      if (step.type === 'roundEnd') break
+      for (let slot = step.current; slot !== null; slot = step.current) {
+        if (slot.ctx.types.has('pon')) {
+          // 现造一对 1m 当候选：不在 ctx.ponTiles 里（库按同一性校验）
+          expectThrow('not-candidate', () =>
+            step.apply(slot.ctx, { action: 'pon', candidate: tiles('1m') }))
+          return
+        }
+        if (step.apply(slot.ctx, bot(slot))) break
+      }
+    }
+    assert.fail('没遇到能碰的局面')
+  })
+
+  it('playToEnd：choose 可以 async，onRoundEnd 返回 false 就停在这一局', async () => {
+    const mahjong = new Mahjong({ createTiles: () => seededWall(2024) })
+    let roundEnds = 0
+    const choose = async (ctx: MahjongContext) => {
+      if (ctx.types.has('ron')) return { action: 'ron' as const }
+      if (ctx.types.has('tsumo')) return { action: 'tsumo' as const }
+      if (ctx.types.has('tsumogiri')) return { action: 'tsumogiri' as const }
+      if (ctx.types.has('tedashi')) {
+        const forbidden = ctx.kuikae ?? []
+        const tile = ctx.player.tiles.find(candidate => !forbidden.some(kind => candidate.equals(kind)))
+        if (tile) return { action: 'tedashi', tile } as const
+      }
+      return { action: 'pass' as const }
+    }
+    const score = await mahjong.playToEnd(choose, () => { roundEnds++; return false })
+    assert.equal(roundEnds, 1, 'onRoundEnd 返回 false 就只打一局')
+    assert.ok(mahjong.lastEnd, '一局打完了')
+    assert.equal(score, mahjong.score)
+    assert.equal(score.reduce((a, b) => a + b, 0) + mahjong.riichibo * 1000, 100000, '分数守恒')
+  })
+
+  it('牌河上的标记：摸切 / 手切 / 立直宣言牌（界面靠它们上色）', () => {
+    const tsumogiri = roundOf()
+    const a = tsumogiri.players[0]
+    a.tiles = tiles('123m456m789m11s23s5s')      // 最后一张是刚摸到的 5s
+    tsumogiri.currentId = 0
+    tsumogiri.kiru = undefined
+    tsumogiri.dahai(a.tiles.at(-1)!)
+    assert.equal(tsumogiri.discarded.tsumogiri, true, '摸到的那张打出去 = 摸切')
+
+    const tedashi = roundOf()
+    const b = tedashi.players[0]
+    b.tiles = tiles('123m456m789m11s23s5s')
+    tedashi.currentId = 0
+    tedashi.kiru = tiles('9p')[0]                // 模拟刚吃/碰过（kiru 有值）
+    tedashi.dahai(b.tiles[0])
+    assert.equal(tedashi.discarded.tsumogiri, false, '手牌里原来的牌打出去 = 手切')
+
+    const declared = roundOf()
+    const c = declared.players[0]
+    c.tiles = tiles('123m456m789m11s23s5s')
+    declared.currentId = 0
+    declared.kiru = undefined
+    declared.dahai(c.tiles.at(-1)!, true)
+    assert.equal(declared.discarded.riichi, true, '立直宣言牌有标记')
+  })
+})
