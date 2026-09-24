@@ -96,7 +96,8 @@ export class MahjongEnd {
     type: RyuukyokuType
     // 荒牌流局
     tenpai?: PlayerId[]
-    // 流局满贯
+    // 荒牌流局的流局满贯：实际结算的人（多家时按 頭ハネ 只留一家，multipleRon 打开时全部列出）。
+    // 按流局算，只结算基本点，本场棒/立直棒留在桌上（见 Mahjong.mopai 的注释）
     mangan?: PlayerId[]
     // 九种九牌
     id?: PlayerId
@@ -490,8 +491,15 @@ export class Mahjong {
   private mopai(keepTurn?: boolean, id?: PlayerId, isRinshan?: boolean) {
     if (this.round.rest === 0) {
       const tenpaiIds = playerIds.filter(id => this.round.players[id].waits)
-      const mangan = playerIds.filter(id => this.round.players[id].ryuukyokuMangan)
+      let mangan = playerIds.filter(id => this.round.players[id].ryuukyokuMangan)
+      // 多家流满和多家和牌共用开关：默认頭ハネ（从亲按顺位找第一家），multipleRon = true 时几家一起结算
+      if (mangan.length > 1 && !this.multipleRon) {
+        let closest = this.round.dealer
+        while (!mangan.includes(closest)) closest = nextId(closest)
+        mangan = [closest]
+      }
       if (mangan.length !== 0) {
+        // 流し満貫按流局处理：只算基本点（满贯 2000），本场棒和立直棒这些场供不动（棒留在桌上）
         const basePoints = 2000
         for (const id of mangan) {
           if (this.round.players[id].isDealer) {
@@ -542,6 +550,9 @@ export class Mahjong {
     const id = this.round.currentId
     const action = this.round.action(id)
     if (!action) throw new MahjongError('unreachable', 'next: 当前这一家没有可选的动作')
+    // 立直要 1000 点以上。分数是 Mahjong 这边的状态（Round 看不到），所以在交给调用方之前摘掉；
+    // 动作本身的校验在 Prompt.apply / discard 里，调用方硬传 riichi 会被 action-not-allowed 挡下
+    if (this.score[id] < 1000) action.types.delete('riichi')
     this.pending = this.createPrompt([new MahjongContext(this.round.player, action)])
   }
 
