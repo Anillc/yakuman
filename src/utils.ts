@@ -51,16 +51,6 @@ export function group(tiles: TileKind[]) {
   }, createEmptyCounts())
 }
 
-export function addCounts(a: Counts, b: Counts) {
-  const c = createEmptyCounts()
-  for (const [key, value] of Object.entries(a)) {
-    for (let i = 0; i < value.length; i++) {
-      c[key][i] = value[i] + b[key][i]
-    }
-  }
-  return c
-}
-
 export function cartesian<T>(...array: T[][]) {
   const [first, ...rest] = array
   return rest.reduce((acc, x) => {
@@ -76,13 +66,6 @@ function compareBlock(a: Block, b: Block) {
     if (a.tiles[i] !== b.tiles[i]) return a.tiles[i] > b.tiles[i] ? 1 : -1
   }
   return 0
-}
-
-function compareCounts(a: Counts, b: Counts) {
-  const x = a.man.join() + a.so.join() + a.pin.join() + a.kaze.join() + a.sangen.join()
-  const y = b.man.join() + b.so.join() + b.pin.join() + b.kaze.join() + b.sangen.join()
-  if (x === y) return 0
-  return x > y ? 1 : -1
 }
 
 export function sortBlocks(blocks: Block[]) {

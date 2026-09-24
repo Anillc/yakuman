@@ -124,9 +124,9 @@ function horaType(player: Player, tiles: TileKind[]): HoraType {
   }
 }
 
-export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: boolean, isChankan: boolean, handOverride?: TileKind[]): HoraResult {
+export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: boolean, isChankan: boolean): HoraResult {
   const yaku: Yaku = { fu: 20, fan: 0 }
-  const handTiles: TileKind[] = handOverride ? [...handOverride] : [...player.tiles]
+  const handTiles: TileKind[] = [...player.tiles]
   if (!horaTile) {
     horaTile = handTiles.pop()
   }

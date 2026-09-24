@@ -242,7 +242,6 @@ function splitKey(decomposition: Decomposed): string {
 }
 
 export type BlockType = 'shuntsu' | 'kotsu' | 'toitsu' | 'ryammen' | 'penchan' | 'kanchan'
-export const blockTypes: BlockType[] = ['shuntsu', 'kotsu', 'toitsu', 'ryammen', 'penchan', 'kanchan']
 export interface Block {
   type: BlockType
   suit: Suit

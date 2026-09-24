@@ -161,8 +161,7 @@ export class Round {
   }
 
   // 如果没有提供 id，则轮到下家并摸牌
-  // 返回 true 则为听牌
-  mopai(keepTurn?: boolean, id?: PlayerId, isRinshan?: boolean): boolean {
+  mopai(keepTurn?: boolean, id?: PlayerId, isRinshan?: boolean) {
     id ??= nextId(this.currentId)
     const tile = this.haiyama.shift()
     tile.playerId = id
@@ -177,17 +176,6 @@ export class Round {
       // 第一巡的第一次摸牌 keepTurn 为 true，所以不会在这里破坏初巡役
       this.breakFirstTurnFlags()
     }
-    return this.updateTenpaiCache()
-  }
-
-  // "打哪张能听牌"的缓存：摸牌后、吃碰后重算，打牌后清空。纯性能缓存（一次向听分解约 12ms，
-  // 一个回合有三处要用，见 tests/scratch-tenpai-bench.ts）；正确性不依赖它，等向听算法变快再删。
-  private tenpaiCache: { discard: TileKind, waits: TileKind[] }[] = null
-
-  private updateTenpaiCache(): boolean {
-    const options = this.player.tenpaiDiscards()
-    this.tenpaiCache = options.length === 0 ? null : options
-    return options.length !== 0
   }
 
   dahai(tile: Tile, riichi: boolean) {
@@ -197,6 +185,9 @@ export class Round {
       const list = this.player.kuikae.map(kind => toMPSZ([kind])).join('/')
       throw new MahjongError('kuikae', `食い替え: 刚鸣进来的牌不能马上打出去（${list}）`)
     }
+    // 打完之后听什么，要在把这张牌从手里拿掉之前算（waitsAfterDiscard 看的是"打掉它之后的 13 张"）。
+    // 不听牌是 undefined（判断用真值），0 张可抽的听牌是空数组、照样算听牌
+    const waits = this.player.waitsAfterDiscard(tile)
     this.player.kuikae = []
     // 摸切 = 打出的就是刚摸到的那张（吃碰之后的打牌算手切）
     tile.tsumogiri = !this.kiru && index === this.player.tiles.length - 1
@@ -235,24 +226,17 @@ export class Round {
         this.sufurenda = true
       }
     }
-    if (this.tenpaiCache) {
-      // 找不到 = 这一打之后不听牌（waits 变成 undefined，判断用真值）
-      this.player.waits = this.tenpaiCache.find(option => compareTileKind(option.discard, tile) === 0)?.waits
-      if (riichi) {
-        if (!this.player.waits || this.player.naki !== 0) {
-          throw new MahjongError('unreachable', '立直: 打这张之后不听牌（应该由调用方先检查）')
-        }
-        tile.riichi = true
-        this.player.riichi = {
-          double: this.firstTurnIntact,
-          iipatsu: true,
-        }
+    this.player.waits = waits
+    if (riichi) {
+      if (!this.player.waits || this.player.naki !== 0) {
+        throw new MahjongError('unreachable', '立直: 打这张之后不听牌（应该由调用方先检查）')
       }
-    } else {
-      this.player.waits = undefined
-      if (riichi) throw new MahjongError('unreachable', '立直: 这一手不能立直（应该由调用方先检查）')
+      tile.riichi = true
+      this.player.riichi = {
+        double: this.firstTurnIntact,
+        iipatsu: true,
+      }
     }
-    this.tenpaiCache = null
     // 岭上标记只描述刚摸到的那张牌
     this.rinshan = false
   }
@@ -278,8 +262,6 @@ export class Round {
     this.currentId = id
     this.breakFirstTurnFlags()
     this.removeRyuukyokuMangan(called.playerId)
-    // 吃没有摸牌，这里补算切牌后的听牌张
-    this.updateTenpaiCache()
   }
 
   pon(id: PlayerId, tiles: Tile[]) {
@@ -308,8 +290,6 @@ export class Round {
     this.currentId = id
     this.breakFirstTurnFlags()
     this.removeRyuukyokuMangan(discarder)
-    // 碰没有摸牌，这里补算切牌后的听牌张
-    this.updateTenpaiCache()
   }
 
   // drawRinshan = false 时只做鸣杠本身，岭上牌由调用方补（要先判四槓散了，见 Mahjong.kan）
@@ -383,31 +363,6 @@ export class Round {
     this.players[id].ryuukyokuMangan = false
   }
 
-  tileRest(id: PlayerId, suit: Suit, rank: number) {
-    let rest = 4
-    const players = this.players
-    for (const player of players) {
-      const tiles = [
-        ...player.discards,
-        ...player.chi.flat(),
-        ...player.pon.flatMap(pon => pon.tiles),
-        ...player.minkan.flat(),
-        ...player.ankan.flat(),
-      ]
-      for (const tile of tiles) {
-        if (tile.equals(suit, rank)) rest--
-      }
-    }
-    for (const tile of this.players[id].tiles) {
-      if (tile.equals(suit, rank)) rest--
-    }
-    const [dorahyoji] = this.dorahyoji
-    for (const tile of dorahyoji) {
-      if (tile.equals(suit, rank)) rest--
-    }
-    return rest
-  }
-
   // kiru.playerId === currentSeat：这一家就是最后打牌的人，已经打过牌了，在等别人响应
   // 否则：这一家还没打牌（刚摸完牌，或刚吃/碰完），由他们打牌
   // 返回 null 则为不需要操作
@@ -465,28 +420,27 @@ export class Round {
       if (this.player.kuikae.length !== 0) {
         action.kuikae = this.player.kuikae
       }
-      if (this.tenpaiCache && this.tenpaiCache.length !== 0) {
-        // kiru 为空说明这一手是真的摸牌（吃、碰后不是），只有摸牌才能立直/自摸
-        const justDrew = !this.kiru
-        if (justDrew && !this.player.riichi && this.player.naki === 0 && this.rest >= 4){
+      // kiru 为空说明这一手是真的摸牌（吃、碰后不是），只有摸牌才能立直/自摸
+      const justDrew = !this.kiru
+      if (justDrew) {
+        // 现算"打哪张能听牌"：用来判立直，以及看这一手有没有和牌张（自摸）
+        const tenpaiDiscards = this.player.tenpaiDiscards()
+        if (!this.player.riichi && this.player.naki === 0 && this.rest >= 4 && tenpaiDiscards.length !== 0) {
           action.types.add('riichi')
         }
-        if (justDrew) {
-          for (const option of this.tenpaiCache) {
-            const canWin = option.waits.some(wait => compareTileKind(option.discard, wait) === 0)
-            if (canWin) {
-              const hora = yaku(this, this.players[id], null, true, false)
-              if (canHora(hora.yaku)) {
-                action.hora = hora
-                action.types.add('tsumo')
-                break
-              }
+        for (const option of tenpaiDiscards) {
+          const canWin = option.waits.some(wait => compareTileKind(option.discard, wait) === 0)
+          if (canWin) {
+            const hora = yaku(this, this.players[id], null, true, false)
+            if (canHora(hora.yaku)) {
+              action.hora = hora
+              action.types.add('tsumo')
+              break
             }
           }
         }
       }
       // 打牌：吃过/碰过之后没有刚摸的牌，只能手切；立直中只能摸切
-      const justDrew = !this.kiru
       if (!justDrew || !this.player.riichi) action.types.add('tedashi')
       if (justDrew) action.types.add('tsumogiri')
       return action
