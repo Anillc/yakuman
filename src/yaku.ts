@@ -1,3 +1,6 @@
+// 和了判定（役与符）。下面注释里的「第N章第M条」都出自 M.League 公式戦ルール：
+//   https://m-league.jp/about （页面里的 rule 段，第1〜9章）
+// 规则开关与整套规则档见 profile.ts
 import { Player, Round, Tile, Suit, kazes, sangens } from './round.js'
 import { Block, Decomposed, chiitoitsuShanten, kokushiMusouShanten, normalShanten, waitSplits } from './tenpai.js'
 import { MahjongError, TileKind, arrayEquals, compareTileKind, group } from './utils.js'

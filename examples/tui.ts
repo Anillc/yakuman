@@ -6,7 +6,7 @@
 import blessed from 'blessed'
 import { writeFileSync } from 'fs'
 import { Command } from 'commander'
-import { Decision, Mahjong, MahjongContext, MahjongEnd, PlayerId, PromptSlot, Tile, kazes, playerIds } from '../src/index.js'
+import { Decision, Mahjong, MahjongContext, MahjongEnd, PlayerId, PromptSlot, RuleProfile, Tile, kazes, mLeague, majsoul, playerIds } from '../src/index.js'
 import { TileKind, compareTileKind, toMPSZ } from '../src/utils.js'
 
 const program = new Command()
@@ -16,12 +16,14 @@ program
   .option('--seat <seat>', '你操作哪一家：0-3 或 ton/nan/sha/pei', '0')
   .option('--seed <seed>', '牌山种子（固定住就能复现同一局）', '20230514')
   .option('--demo', '四家都交给机器人自动打')
+  .option('--profile <profile>', '规则档：m-league（默认）或 majsoul', 'm-league')
   .option('--snapshot [path]', '不交互：打几手后把画面以纯文本输出（给路径就写文件，不给就打到 stdout）')
   .option('--after <after>', '配合 --snapshot：答完 N 格就停在那一格截图')
   .addHelpText('after', `
 例子：
   yarn tsx examples/tui.ts --seat=0                    自己打一家，其余机器人（打到半庄结束）
   yarn tsx examples/tui.ts --demo --seed=7             四家机器人，看效果
+  yarn tsx examples/tui.ts --profile=majsoul           换一套规则（预设里目前只有 m-league 和 majsoul）
   yarn tsx examples/tui.ts --snapshot --after=120      第 120 手时的画面打到 stdout
   yarn tsx examples/tui.ts --snapshot=/tmp/f.txt       同上，写进文件`)
   .showHelpAfterError()
@@ -68,7 +70,16 @@ function makeWall(): Tile[] {
   return tiles
 }
 
-const mahjong = new Mahjong({ createTiles: () => makeWall() })
+// 规则档：预设里目前有 m-league（默认）和 majsoul，不认识的档名直接报错
+const profiles: Record<string, RuleProfile> = { 'm-league': mLeague, majsoul }
+const profileName = String(options.profile).toLowerCase()
+const profile = profiles[profileName]
+if (!profile) {
+  console.error(`不认识的规则档：${options.profile}（可用：${Object.keys(profiles).join(' / ')}）`)
+  process.exit(1)
+}
+
+const mahjong = new Mahjong({ profile, createTiles: () => makeWall() })
 
 // —— 画面上的小工具 ——
 const kazeName = { ton: '东', nan: '南', sha: '西', pei: '北' } as const

@@ -1,16 +1,23 @@
+// 一场牌（多局）的状态机与对外 API。注释里的「第N章第M条」出自 M.League 公式戦ルール：
+//   https://m-league.jp/about （页面里的 rule 段，第1〜9章）
+// 规则开关与整套规则档（mLeague / majsoul）见 profile.ts
 import { Action, ActionType, Kan, Kaze, PaoYaku, Player, PlayerId, Round, Tile, playerIds } from './round.js'
 import { MahjongError, TileKind, nextId, shimocha } from './utils.js'
 import { HoraResult, basicPoints } from './yaku.js'
+import { RuleProfile, defaultProfile, mergeProfile } from './profile.js'
 
 export * from './round.js'
 export * from './tenpai.js'
 export * from './utils.js'
 export * from './yaku.js'
+export * from './profile.js'
 
 // 规则补充（调用方会碰到的）：
 // - 食い替え禁止：刚鸣的那张（吃的话还有同筋的另一端）不能马上打，挂在 ctx.kuikae 上
 // - 吃、碰之后这一巡不能杠（所以要先把 ctx.types 里的 kan 当成"摸牌后才可能有"）
 // - 包（責任払い）默认开（M.League 第8章第1条），见 MahjongOptions.pao
+// - 整套规则开关打包在 profile.ts 里（mLeague / majsoul），见 MahjongOptions.profile
+// - 条文原文：https://m-league.jp/about （rule 段，第1〜9章）
 //
 // 牌局由调用方"拉"着走：
 //
@@ -117,44 +124,13 @@ export type Decision =
   | { action: 'ryuukyoku' }
   | { action: 'pass' }
 
-export interface MahjongOptions {
+// 选项 = 规则开关（RuleProfile 里的那些；单独传会覆盖 profile）+ 下面这两个
+export interface MahjongOptions extends Partial<RuleProfile> {
+  // 整套规则档：不传就是 mLeague；这里写的会被单独传的开关覆盖
+  profile?: Partial<RuleProfile>
   // 可选：自定义牌山生成（庄家座位、第几局、本场棒），用于测试或复盘。
   // 返回 136 张、按摸牌顺序排：前 52 张当配牌、末尾 14 张当王牌（岭上牌 + 宝牌指示牌）
   createTiles?: (dealerId: PlayerId, kyoku: number, homba: number) => Tile[]
-  // 可选：多家荣和。false（默认，M.League 第5章第1条：一局只能有一家和，頭ハネ）= 只有离放铳者最近的那家和；
-  // true = 每家和牌者都收
-  multipleRon?: boolean
-  // 可选：包（責任払い）。true（默认，M.League 第8章第1条）= 包生效，对象是大三元 / 大四喜 / 四槓子。
-  // 责任只承担被鸣确定的那手役满：自摸时那手役满三家该付的全由责任者出（責任払い），
-  // 别家放铳时责任者与放铳者各出一半（折半払い）——双倍役满以上时被鸣确定的那手役满仍是这个算法，
-  // 其余役满部分按普通和牌结算（含本场棒由鸣牌者负担）。
-  // false = 不包，和了按普通算。责任者是谁仍然记在 MahjongEnd.hora[].pao 里
-  pao?: boolean
-  // —— 规则开关（不传就用这里的默认值；默认按 M.League 官方规则，条文出处见注释）——
-  // 赤牌枚数：0 = 无赤牌，3（默认，第1章第2条「5萬・5筒・5索の各1枚」），4 = 再加一张赤 5m
-  redFives?: 0 | 3 | 4
-  // 食断：true（默认，第9章把断么九列为非门前役）= 副露也认断幺九；false = 只有门清才认
-  kuidashiTanyao?: boolean
-  // 切上满贯：true（默认，第6章第6条满贯含「30符6翻」「60符5翻」，含场ゾロ即 4 番 30 符 / 3 番 60 符）
-  // false = 这两种按 7700（亲 11600）算
-  kiriageMangan?: boolean
-  // 流局满贯（流し満貫）：false（默认，规则条文里没有这一条）= 不成立，按普通荒牌流局结算；true = 有
-  nagashiMangan?: boolean
-  // 双倍役满：false（默认，第9章役满表没有单列这几种）= 四暗刻单骑 / 国士13面 / 纯正九莲 / 大四喜 按 13 番；
-  // true = 按 26 番
-  doubleYakuman?: boolean
-  // 途中流局（九種九牌 / 四風連打 / 四家立直 / 四槓散了）：false（默认，第3章第2条「途中流局はない」）= 不发生
-  abortiveDraws?: boolean
-  // 被飞：false（默认，第3章第2条「持ち点が無くなった場合でも最終局が終了するまで続行」）
-  bustEndsGame?: boolean
-  // 数え役满：false（默认，第6章第6条「役満以外の役が複合したアガリ点は三倍満まで」）；true = 13 番以上按役满
-  kazoeYakuman?: boolean
-  // 0 张可抽的听牌（听牌张都被自己的手牌/副露吃掉）：false（默认，第3章第11条「認められない」）
-  zeroWaitTenpai?: boolean
-  // 立直要求牌山还剩 ≥4 张：false（默认，第4章第8条只禁止「摸到海底牌之后立直」）；true = 另一些规则的 4 张限制
-  riichiNeedsFourTiles?: boolean
-  // 国士无双抢暗杠：false（默认，第4章第5条「いかなる場合でも、暗槓の搶槓は成立しない」）；true = 认这条本地规则
-  kokushiAnkanChankan?: boolean
 }
 
 export class Mahjong {
@@ -168,20 +144,20 @@ export class Mahjong {
   // 桌上已有的立直棒数量（每根 1000 点，和牌者收）
   riichibo = 0
   lastEnd: MahjongEnd
-  multipleRon = false
-  pao = true
-  // 规则开关（默认值见 MahjongOptions 的注释；给空就是这里的默认）
-  redFives: 0 | 3 | 4 = 3
-  kuidashiTanyao = true
-  kiriageMangan = true
-  nagashiMangan = false
-  doubleYakuman = false
-  abortiveDraws = false
-  bustEndsGame = false
-  kazoeYakuman = false
-  zeroWaitTenpai = false
-  riichiNeedsFourTiles = false
-  kokushiAnkanChankan = false
+  // 规则开关：默认取 defaultProfile（= mLeague），构造时按 profile / 单独传的选项覆盖（见 profile.ts）
+  multipleRon = defaultProfile.multipleRon
+  pao = defaultProfile.pao
+  redFives: 0 | 3 | 4 = defaultProfile.redFives
+  kuidashiTanyao = defaultProfile.kuidashiTanyao
+  kiriageMangan = defaultProfile.kiriageMangan
+  nagashiMangan = defaultProfile.nagashiMangan
+  doubleYakuman = defaultProfile.doubleYakuman
+  abortiveDraws = defaultProfile.abortiveDraws
+  bustEndsGame = defaultProfile.bustEndsGame
+  kazoeYakuman = defaultProfile.kazoeYakuman
+  zeroWaitTenpai = defaultProfile.zeroWaitTenpai
+  riichiNeedsFourTiles = defaultProfile.riichiNeedsFourTiles
+  kokushiAnkanChankan = defaultProfile.kokushiAnkanChankan
 
   // 下一个要交给调用方的 step（一个询问，或一次局终）
   private pending: Step | null = null
@@ -189,19 +165,8 @@ export class Mahjong {
 
   constructor(options?: MahjongOptions) {
     this.createTiles = options?.createTiles
-    if (options?.multipleRon !== undefined) this.multipleRon = options.multipleRon
-    if (options?.pao !== undefined) this.pao = options.pao
-    if (options?.redFives !== undefined) this.redFives = options.redFives
-    if (options?.kuidashiTanyao !== undefined) this.kuidashiTanyao = options.kuidashiTanyao
-    if (options?.kiriageMangan !== undefined) this.kiriageMangan = options.kiriageMangan
-    if (options?.nagashiMangan !== undefined) this.nagashiMangan = options.nagashiMangan
-    if (options?.doubleYakuman !== undefined) this.doubleYakuman = options.doubleYakuman
-    if (options?.abortiveDraws !== undefined) this.abortiveDraws = options.abortiveDraws
-    if (options?.bustEndsGame !== undefined) this.bustEndsGame = options.bustEndsGame
-    if (options?.kazoeYakuman !== undefined) this.kazoeYakuman = options.kazoeYakuman
-    if (options?.zeroWaitTenpai !== undefined) this.zeroWaitTenpai = options.zeroWaitTenpai
-    if (options?.riichiNeedsFourTiles !== undefined) this.riichiNeedsFourTiles = options.riichiNeedsFourTiles
-    if (options?.kokushiAnkanChankan !== undefined) this.kokushiAnkanChankan = options.kokushiAnkanChankan
+    // 规则：默认档 → profile → options 里单独传的开关（后者覆盖前者）
+    Object.assign(this, mergeProfile(options?.profile, options))
     // 起家是 0 号，之后由 nextRound() 轮转
     this.createRound(0)
     this.next()

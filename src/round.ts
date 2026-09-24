@@ -1,6 +1,10 @@
+// 一局的状态机（牌山、手牌、副露、动作候选）。下面注释里的「第N章第M条」都出自
+// M.League 公式戦ルール：https://m-league.jp/about （页面里的 rule 段，第1〜9章）
+// 规则开关与整套规则档见 profile.ts
 import { shanten, waits } from './tenpai.js'
 import { MahjongError, TileKind, compareTileKind, createEmptyCounts, group, nextId, shimocha, shuffle, toMPSZ, toTileKinds, uniqTileKinds } from './utils.js'
 import { HoraResult, canHora, yaku } from './yaku.js'
+import { defaultProfile } from './profile.js'
 
 export type Kaze = 'ton' | 'nan' | 'sha' | 'pei'
 export const kazes: Kaze[] = ['ton', 'nan', 'sha', 'pei']
@@ -85,21 +89,14 @@ export class Round {
   // true -> 四风连打
   sufurenda: TileKind | boolean = null
 
-  // 规则开关。这里是直接 new Round 时的默认值（按 M.League）；走 Mahjong 的话由选项覆盖（见 MahjongOptions）
-  // 食断：副露也认断幺九（M.League 第9章：断么九 不是门前役）
-  kuidashiTanyao = true
-  // 切上满贯：4 番 30 符 / 3 番 60 符 按满贯算（M.League 第6章第6条）
-  kiriageMangan = true
-  // 双倍役满：四暗刻単骑 / 国士无双十三面 / 纯正九莲宝灯 / 大四喜（M.League 没有，都算单倍）
-  doubleYakuman = false
-  // 数え役满：false = 13 番以上（非役满）按三倍满封顶（M.League 第6章第6条）
-  kazoeYakuman = false
-  // 途中流局（九種九牌 / 四風連打 / 四家立直 / 四槓散了）：M.League 第3章第2条「途中流局はない」
-  abortiveDraws = false
-  // 立直要求牌山还剩 ≥4 张：M.League 第4章第8条只禁止"摸到海底牌后立直"，所以默认 false
-  riichiNeedsFourTiles = false
-  // 国士无双抢暗杠：M.League 第4章第5条「いかなる場合でも、暗槓の搶槓は成立しない」，所以默认 false
-  kokushiAnkanChankan = false
+  // 规则开关：直接 new Round 的时候默认取 defaultProfile（= mLeague）；走 Mahjong 的话由 profile / 选项覆盖
+  kuidashiTanyao = defaultProfile.kuidashiTanyao
+  kiriageMangan = defaultProfile.kiriageMangan
+  doubleYakuman = defaultProfile.doubleYakuman
+  kazoeYakuman = defaultProfile.kazoeYakuman
+  abortiveDraws = defaultProfile.abortiveDraws
+  riichiNeedsFourTiles = defaultProfile.riichiNeedsFourTiles
+  kokushiAnkanChankan = defaultProfile.kokushiAnkanChankan
 
   constructor (
     // 场风
