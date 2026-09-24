@@ -1,4 +1,7 @@
 /node_modules/
+/.yarn/
 /lib/
 /tests/
-.yarn/
+
+/.direnv
+/result
