@@ -82,7 +82,8 @@ export const mLeague: RuleProfile = {
 }
 
 // 默认规则档：new Mahjong() 不传 profile 时整库就用这一档，也就是 mLeague。
-// （要改整库默认就改这一行；一般不用动，调用时显式传 profile 更清楚）
+// defaultProfile 和 mLeague 是同一个对象：预设当只读用，要改规则请铺开成新对象
+// （{ ...mLeague, xxx: yyy }）—— 直接改字段会连预设和其它实例一起改掉
 export const defaultProfile: RuleProfile = mLeague
 
 // 雀魂（四人段位戦）。前四项和 M.League 一样，后面几项不同

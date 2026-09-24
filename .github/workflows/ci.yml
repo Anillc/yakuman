@@ -29,6 +29,8 @@ jobs:
           yarn install --immutable
           yarn typecheck && yarn test
           yarn build
+          # 发布出去的 lib/ 必须能被纯 Node 直接 import（测试都走 tsx，拦不住 JSON import attribute 这类问题）
+          node --input-type=module -e "await import('./lib/index.js')"
       - id: version
         env:
           BEFORE_SHA: ${{ github.event.before }}

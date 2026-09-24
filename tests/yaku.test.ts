@@ -225,3 +225,28 @@ describe('海底 / 河底 / 岭上', () => {
     assert.equal(last(true, true).yaku.rinshan, 1)
   })
 })
+
+describe('一发', () => {
+  it('活到立直者自己下一次打牌：巡目推进（庄家摸牌）不会清掉一发', () => {
+    // 123m 456m 789m 11s 23s（听 1s / 4s），摸到 5s 后摸切宣言立直
+    const round = roundOf()
+    const player = round.players[1]
+    player.tiles = tiles('123m456m789m11s23s5s')
+    round.currentId = 1
+    round.kiru = undefined
+    round.dahai(player.tiles.find(tile => tile.suit === 'so' && tile.rank === 5)!, true)
+    assert.equal(player.riichi?.iipatsu, true, '宣言之后一发是活的')
+    // 2 号、3 号各摸打一次，然后轮到庄家摸牌 —— 这里只是巡目推进，不是鸣牌
+    round.mopai(); round.dahai(round.player.drawn)
+    round.mopai(); round.dahai(round.player.drawn)
+    round.mopai()
+    assert.equal(player.riichi?.iipatsu, true, '庄家摸牌不该清掉别人的一发')
+    round.dahai(round.player.drawn)
+    // 自己摸到 4s：立直一発ツモ
+    round.haiyama.unshift(tiles('4s')[0])
+    round.mopai()
+    const hora = yaku(round, player, true)
+    assert.equal(hora.yaku.riichi, 1)
+    assert.equal(hora.yaku.ippatsu, 1, '立直一発ツモ')
+  })
+})

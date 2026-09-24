@@ -124,7 +124,9 @@ export function assertTileCount(mahjong: Mahjong) {
   for (const id of playerIds) {
     const player = round.players[id]
     total += player.tiles.length + player.discards.length
-    total += player.chi.length * 3 + player.pon.length * 3 + player.minkan.length * 4 + player.ankan.length * 4
+    // 碰按实际的牌数算：加杠存在 pon 里，是 4 张（写死 *3 会把加杠少算一张）
+    total += player.chi.length * 3 + player.pon.reduce((sum, pon) => sum + pon.tiles.length, 0)
+      + player.minkan.length * 4 + player.ankan.length * 4
   }
   return total
 }
@@ -143,8 +145,14 @@ export function simpleBot(mahjong: Mahjong, seed = 1, meldRate = 0, riichiRate =
     if (ctx.types.has('tsumo')) return { action: 'tsumo' }
     if (ctx.types.has('pon') && rnd() < meldRate) return { action: 'pon', candidate: ctx.ponTiles![0] }
     if (ctx.types.has('chi') && rnd() < meldRate) return { action: 'chi', candidate: ctx.chiTiles![0] }
-    const minkan = ctx.kans?.find(kan => kan.type === 'minkan')
-    if (minkan && rnd() < meldRate) return { action: 'kan', kan: minkan }
+    // 立直中的暗杠本来就难得出现（要听牌张不变），出现就杠，好让随机对局也覆盖到这条路径
+    if (ctx.player.riichi) {
+      const ankan = ctx.kans?.find(kan => kan.type === 'ankan')
+      if (ankan) return { action: 'kan', kan: ankan }
+    }
+    // 三种杠都随机挑一个：明杠/暗杠/加杠都得被试到（立直中暗杠的候选由库里先过滤好）
+    const kan = ctx.kans?.length ? ctx.kans[Math.floor(rnd() * ctx.kans.length)] : undefined
+    if (kan && rnd() < meldRate) return { action: 'kan', kan }
     const drawn = ctx.player.tiles.at(-1)
     const kuikae = ctx.kuikae ?? []
     const forbidden = (tile: Tile) => kuikae.some(kind => tile.equals(kind))

@@ -1,5 +1,7 @@
 import { Suit } from './round.js'
-import rawTables from './table.json'
+// 必须带 import attribute：module = nodenext 时 Node 的 ESM 只认 `with { type: 'json' }`
+// （少了它发布出去的 lib/ 在纯 Node 下会 ERR_IMPORT_ATTRIBUTE_MISSING）
+import rawTables from './table.json' with { type: 'json' }
 import {
   Counts, TileKind, cartesian, cloneCounts, createEmptyCounts, sortBlocks, sortTileKinds, uniqTileKinds,
 } from './utils.js'

@@ -63,6 +63,9 @@ export interface Action {
 
 export class Round {
   kanCount: number = 0
+  // 四槓散了候补：第 4 个槓成立时挂上（见 Mahjong.checkKan）。挂上之后这一打只判和牌，
+  // 和牌机会（岭上开花 / 打出去点炮）都走完还没人赢才由 Mahjong 宣布流局
+  suukansanra = false
   // 正在"预备"的暗杠/加杠（等抢杠窗口走完才算成立，见 establishKan）
   private pendingKan?: { type: 'ankan' | 'chakan', playerId: PlayerId, tiles: Tile[] }
   // 活牌山（摸牌顺序）。王牌不在这里，见 wanpai
@@ -200,8 +203,10 @@ export class Round {
     // 巡目以庄家为起点：庄家摸第二次就算进入下一巡；吃碰不摸牌，所以不会推进巡目
     if (!keepTurn && id === this.dealer) {
       this.turn++
-      // 第一巡的第一次摸牌 keepTurn 为 true，所以不会在这里破坏初巡役
-      this.breakFirstTurnFlags()
+      // 第一巡的第一次摸牌 keepTurn 为 true，所以不会在这里破坏初巡役。
+      // 这里只关初巡标记：巡目推进不是鸣牌，一発要活到立直者自己下一次打牌（在 dahai 里清），
+      // 顺手清掉的话立直一発ツモ 就永远算不出来了
+      this.firstTurnIntact = false
     }
   }
 
@@ -390,7 +395,8 @@ export class Round {
     player.dojunfuriten = true
   }
 
-  // 鸣牌会破坏一发、地和、九种九牌、双立直、四风连打
+  // 鸣牌（含槓）会破坏一发、地和、九种九牌、双立直、四风连打。
+  // 巡目推进（庄家摸第二次）只关初巡标记，走的是 mopai，别在这里被误用
   breakFirstTurnFlags() {
     this.firstTurnIntact = false
     for (const player of this.players) {
@@ -405,7 +411,8 @@ export class Round {
   // kiru.playerId === currentSeat：这一家就是最后打牌的人，已经打过牌了，在等别人响应
   // 否则：这一家还没打牌（刚摸完牌，或刚吃/碰完），由他们打牌
   // 返回 null 则为不需要操作
-  action(id: PlayerId, isChankan?: boolean, isAnkanChankan?: boolean): Action | null {
+  // ronOnly = 四槓散了那一打：只判和牌（点炮算和、没人要就流局），不给吃碰杠
+  action(id: PlayerId, isChankan?: boolean, isAnkanChankan?: boolean, ronOnly?: boolean): Action | null {
     const beforeDiscard = !this.kiru || this.kiru.playerId !== this.currentId
     if (beforeDiscard) {
       if (id !== this.currentId) return null
@@ -423,7 +430,8 @@ export class Round {
           action.types.add('ryuukyoku')
         }
       }
-      // 最后一张牌的时候没有杠；吃/碰之后也不能杠（要先打一张，kiru 为空才是真的摸牌）
+      // 摸到海底牌（牌山最后一张）之后不能杠：岭上牌会把这一局拖过海底（河底牌同理，见下面）；
+      // 吃/碰之后也不能杠（要先打一张，kiru 为空才是真的摸牌）
       if (!this.kiru && this.rest !== 0 && this.kanCount < 4) {
         const ankan = this.player.ankanTiles
         if (this.players[id].riichi) {
@@ -514,8 +522,9 @@ export class Round {
           this.minogashi(id)
         }
       }
-      // 杠（暗杠/加杠）之后只可能被抢杠，不能吃碰：kiru 这时是一张杠牌
-      if (!isChankan && this.rest !== 0 && !this.players[id].riichi) {
+      // 牌山摸完后的最后一张弃牌（河底牌）只能荣和，不给吃碰杠（岭上牌也一样，见上面）；
+      // 杠（暗杠/加杠）之后也只可能被抢杠，不能吃碰：kiru 这时是一张杠牌
+      if (!isChankan && !ronOnly && this.rest !== 0 && !this.players[id].riichi) {
         const pon = this.players[id].ponTiles
         if (pon.length !== 0) {
           action.types.add('pon')
@@ -691,6 +700,12 @@ export class Player {
         .sort()
         .join(',')
       if (seen.has(key)) return
+      // 吃完之后可能一张都打不出去（剩下的手牌全是食い替え禁止牌）：这一吃本身就不合法，
+      // 不能给候选 —— 不然调用方会拿到一个"没有任何合法动作"的死局
+      const meld = [first, second, current].sort(compareTileKind)
+      const forbidden = chiKuikae(current, meld)
+      const rest = this.tiles.filter(tile => tile !== first && tile !== second)
+      if (rest.every(tile => forbidden.some(kind => tile.equals(kind)))) return
       seen.add(key)
       chizai.push([first, second])
     }

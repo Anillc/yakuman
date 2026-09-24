@@ -17,6 +17,7 @@ export * from './profile.js'
 // - 吃、碰之后这一巡不能杠（所以要先把 ctx.types 里的 kan 当成"摸牌后才可能有"）
 // - 包（責任払い）默认开（M.League 第8章第1条），见 MahjongOptions.pao
 // - 整套规则开关打包在 profile.ts 里（mLeague / majsoul），见 MahjongOptions.profile
+// - 和牌优先：途中流局（四家立直 / 四風連打 / 四槓散了）都要等这一打的吃碰杠和都没人要才成立
 // - 条文原文：https://m-league.jp/about （rule 段，第1〜9章）
 //
 // 牌局由调用方"拉"着走：
@@ -346,18 +347,43 @@ export class Mahjong {
 
   // 全都没要（不吃碰杠和）：能和却不和的记见逃（同巡振听），然后继续摸牌；
   // drawer 非空表示刚才问的是抢杠，没人抢就由开杠的那家补一张岭上牌。
+  // 和牌优先：途中流局（四家立直 / 四風連打 / 四槓散了）都在这里判 —— 这张牌没人要才成立。
   private passAll(ctxs: MahjongContext[], drawer?: PlayerId) {
     // 没人抢杠 → 这一杠成立（成立之后才翻杠宝牌、才破一発、才判四槓散了）
     if (drawer !== undefined) this.round.establishKan()
-    if (!this.checkKan()) return
+    this.checkKan()
     for (const ctx of ctxs) {
       if (ctx.types.has('ron')) this.round.minogashi(ctx.player.id)
+    }
+    // 这一打被人荣和 → 和牌成立，四家立直 / 四風連打 不算
+    const abortive = this.abortiveDraw()
+    if (abortive) {
+      this.end(abortive)
+      return
+    }
+    // 四槓散了：第 4 个槓补的岭上牌没人自摸、这一打也没人点炮 → 才真的流局
+    if (drawer === undefined && this.round.suukansanra) {
+      this.end({ type: 'ryuukyoku', ryuukyoku: { type: 'suukansanra' } })
+      return
     }
     if (drawer) {
       this.mopai(true, drawer, true)
     } else {
       this.mopai()
     }
+  }
+
+  // 和牌优先的途中流局：四家立直 / 四風連打 要等这一打的吃碰杠和都没人要才成立
+  // （第 4 家的立直宣言牌也可能是别人的和牌张；这时四家都在立直，只有荣和可能发生）
+  private abortiveDraw(): MahjongEnd | undefined {
+    if (!this.profile.abortiveDraws || !this.round.kiru) return undefined
+    if (this.round.kiru.riichi && this.round.players.every(player => player.riichi)) {
+      return { type: 'ryuukyoku', ryuukyoku: { type: 'suuchaRiichi' } }
+    }
+    if (this.round.sufurenda) {
+      return { type: 'ryuukyoku', ryuukyoku: { type: 'sufurenda' } }
+    }
+    return undefined
   }
 
   private applyDecision(ctx: MahjongContext, decision: Decision) {
@@ -419,15 +445,9 @@ export class Mahjong {
       }
     }
     this.round.dahai(tile, riichi)
-    // 打完之后问其余三家要不要吃碰杠和，并顺带判定四家立直 / 四风连打
-    // 途中流局（四家立直 / 四風連打）只在 abortiveDraws 打开时成立（M.League 没有途中流局）
-    if (this.profile.abortiveDraws && riichi && this.round.players.every(player => player.riichi)) {
-      this.end({ type: 'ryuukyoku', ryuukyoku: { type: 'suuchaRiichi' } })
-    } else if (this.profile.abortiveDraws && this.round.sufurenda) {
-      this.end({ type: 'ryuukyoku', ryuukyoku: { type: 'sufurenda' } })
-    } else {
-      this.naki()
-    }
+    // 打完之后问其余三家要不要吃碰杠和。途中流局（四家立直 / 四風連打）也在这之后判：
+    // 和牌优先，这一打被人荣和就不算流局（见 passAll / abortiveDraw）
+    this.naki()
   }
 
   // 吃碰杠都直接传候选本身（chiTiles / ponTiles / kans 里的那一项）。
@@ -461,9 +481,10 @@ export class Mahjong {
     if (!ctx.types.has('kan')) throw new MahjongError('action-not-allowed', `${this.what(kan)}: 现在不能杠`)
     this.candidate(ctx.kans, kan, this.what(kan))
     if (kan.type === 'minkan') {
-      // 明杠不会被抢，但可能是第 4 个槓（四槓散了）：先做杠、判流局，没人流局才补岭上
+      // 明杠不会被抢，但可能是第 4 个槓（四槓散了）：先做杠、挂标记，再照常补岭上牌
       this.round.minkan(ctx.player.id, kan.tiles, false)
-      if (this.checkKan()) this.mopai(true, ctx.player.id, true)
+      this.checkKan()
+      this.mopai(true, ctx.player.id, true)
     } else if (kan.type === 'ankan') {
       this.round.ankan(kan.tiles)
       this.naki(true, true)
@@ -676,24 +697,19 @@ export class Mahjong {
   // 有人打牌（或开杠）后，问其余几家要不要吃、碰、杠、和；
   // 都没人要就继续摸牌（牌山摸完时由 mopai() 走荒牌流局）
   private naki(isKan?: boolean, isAnkan?: boolean) {
+    // 四槓散了那一打只判和牌（见 Round.suukansanra）：吃碰杠都不给
+    const ronOnly = !isKan && this.round.suukansanra
     const others = playerIds.filter(id => id !== this.round.currentId)
     const ctxs: MahjongContext[] = []
     for (const id of others) {
-      const action = this.round.action(id, isKan, isAnkan)
+      const action = this.round.action(id, isKan, isAnkan, ronOnly)
       if (!action) continue
       ctxs.push(new MahjongContext(this.round.players[id], action))
     }
     if (ctxs.length === 0) {
-      // 没人能抢杠 → 这一杠成立（暗杠/加杠都先"预备"，到这里才真的算一杠）
-      if (isKan) this.round.establishKan()
-      if (this.checkKan()) {
-        if (isKan) {
-          // 杠的补牌（岭上）
-          this.mopai(true, this.round.currentId, true)
-        } else {
-          this.mopai()
-        }
-      }
+      // 没人能要这张牌：和"大家都答了 pass"一样，统一交给 passAll 收尾
+      //（暗杠/加杠都先"预备"，到这里才真的算一杠；岭上牌也在这里补）
+      this.passAll([], isKan ? this.round.currentId : undefined)
       return
     }
     // 先问能和的人（可以多家），再问碰/明杠，最后问吃；同一档按玩家编号
@@ -821,27 +837,15 @@ export class Mahjong {
     }
   }
 
-  // 检查四杠散了：四家合计四杠、且不是某一家独占四杠时流局。
-  // 返回 true 表示没有流局（可以继续摸牌）
-  private checkKan(): boolean {
-    if (this.profile.abortiveDraws && this.round.kanCount === 4) {
-      // 如果某一家自己有四杠，那就不流局
-      const ryuukyoku = !playerIds.some(id => {
-        const player = this.round.players[id]
-        // 加杠记在 pon 里，必须用 player.kanCount，不然四槓子会被当成四槓散了
-        return player.kanCount === 4
-      })
-      if (ryuukyoku) {
-        this.end({
-          type: 'ryuukyoku',
-          ryuukyoku: {
-            type: 'suukansanra',
-          },
-        })
-        return false
-      }
-    }
-    return true
+  // 检查四槓散了：四家合计四杠、且不是某一家独占四杠时流局。
+  // 和牌优先：第 4 个槓照样补岭上牌、照样让开杠的那家打一张，岭上开花和这一打的点炮都算和，
+  // 都没人才流局 —— 所以这里只挂 Round.suukansanra，真正的收尾在 passAll（那时 drawer 为空）
+  private checkKan() {
+    if (!this.profile.abortiveDraws || this.round.kanCount !== 4) return
+    // 某一家自己有四槓就不流局（四槓子）。加杠记在 pon 里，必须用 player.kanCount，
+    // 不然四槓子会被当成四槓散了
+    if (playerIds.some(id => this.round.players[id].kanCount === 4)) return
+    this.round.suukansanra = true
   }
   
   private createRound(dealer: PlayerId) {

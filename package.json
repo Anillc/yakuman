@@ -30,7 +30,7 @@
     "blessed": "^0.1.81",
     "commander": "^15",
     "tsx": "^4.23.15",
-    "typescript": "^5.0.4"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "lodash.uniqwith": "^4.5.0"

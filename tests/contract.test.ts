@@ -112,6 +112,24 @@ describe('Prompt 的守卫', () => {
     expectThrow('kuikae', () => round.dahai(player.tiles.find(tile => tile.suit === 'man' && tile.rank === 2)!))
   })
 
+  it('食い替えで打てる牌が無くなる吃は候補に出さない', () => {
+    // 1 号三副露 + 手牌 2p3p4p5p，0 号打 2p：吃 3p4p 之后只剩 2p/5p，两张都是食い替え禁止牌。
+    // 这种吃本身就不合法 —— 给了候选，调用方会拿到一个"没有任何合法动作"的死局
+    const round = roundOf()
+    const player = round.players[1]
+    player.chi = [tiles('123m'), tiles('456m'), tiles('789m')]
+    player.tiles = tiles('234p5p')
+    const called = tiles('2p')[0]
+    called.playerId = 0
+    round.players[0].discards.push(called)
+    round.currentId = 0
+    round.kiru = called
+    assert.deepEqual(player.chiTiles, [], '打完就无牌可打 → 不给这个候选')
+    // 手里多一张能打的牌，就可以吃
+    player.tiles = tiles('234p5p8s')
+    assert.equal(player.chiTiles.length, 1)
+  })
+
   it('立直要 1000 点以上', () => {
     const mahjong = new Mahjong({ createTiles: () => seededWall(3) })
     const round = mahjong.round
@@ -126,6 +144,22 @@ describe('Prompt 的守卫', () => {
     ;(mahjong as unknown as { next(): void }).next()
     const slot = (mahjong as unknown as { pending: { current: { ctx: MahjongContext } } }).pending.current
     assert.ok(!slot.ctx.types.has('riichi'), '点数不够时不该给立直选项')
+  })
+
+  it('「立直要牌山剩 ≥4 张」看的是宣言那一刻（刚摸完牌）的剩余张数', () => {
+    const canRiichi = (rest: number, riichiNeedsFourTiles: boolean) => {
+      const round = roundOf(0, { riichiNeedsFourTiles })
+      const player = round.players[1]
+      player.tiles = tiles('123m456m789m11s23s5s')   // 刚摸到 5s，打出去就听 1s/4s
+      round.currentId = 1
+      round.kiru = undefined
+      round.haiyama = Array.from({ length: rest }, () => tiles('9m')[0])
+      return round.action(1)!.types.has('riichi')
+    }
+    assert.equal(canRiichi(4, true), true, '剩 4 张：可以宣言')
+    assert.equal(canRiichi(3, true), false, '剩 3 张：不行')
+    assert.equal(canRiichi(1, false), true, 'mLeague 档只要不是海底牌就能立直')
+    assert.equal(canRiichi(0, false), false, '刚摸到海底牌不能立直（第4章第8条）')
   })
 
   it('0 张可抽的听牌不能立直（不算听牌的档）', () => {

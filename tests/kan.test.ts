@@ -218,6 +218,44 @@ describe('抢杠', () => {
     ], '杠前等 1m / 5m / 8m')
     assert.deepEqual(changed.action.kans ?? [], [], '听牌张会变 → 不给暗杠候选')
   })
+
+  it('立直中的暗杠：真打一遍（补岭上牌、破一发、听牌张不变）', async () => {
+    // 1 号手牌 234m 678m 234p 777p + 3s（単騎 3s），第一巡摸切宣言立直；
+    // 第二巡摸到第 4 张 7p —— 杠掉 7777p 之后还是等 3s，所以引擎要给暗杠候选
+    const wall = canonicalWall()
+    const hands = [
+      hand('1122334455668p', wall),
+      hand('234678m3s234777p', wall),
+      hand('1112223334445z', wall),
+      hand('1112223334448m', wall),
+    ]
+    // 1 号是第 2 个摸牌的人，所以他的第二次摸牌在牌山第 6 张（下标 5）：把第 4 张 7p 放那儿
+    const sevenP = take('7p', wall)[0]
+    wall.splice(5, 0, sevenP)
+    const mahjong = new Mahjong({ createTiles: () => [...hands.flat(), ...wall] })
+    const player = mahjong.round.players[1]
+    await runUntil(mahjong, slot => {
+      if (slot.ctx.player.ankan.length === 1) throw new Stop()   // 杠完了，出去断言
+      const ctx = slot.ctx
+      const ankan = ctx.player.id === 1 && ctx.types.has('kan')
+        ? ctx.kans!.find(kan => kan.type === 'ankan')
+        : undefined
+      if (ankan) return { action: 'kan', kan: ankan }
+      if (ctx.types.has('tedashi') || ctx.types.has('tsumogiri')) {
+        // 1 号第一巡摸切立直（其余人只是摸切）
+        const riichi = ctx.player.id === 1 && !ctx.player.riichi && ctx.types.has('riichi')
+          && !!ctx.player.waitsAfterDiscard(ctx.player.drawn)
+        return { action: 'tsumogiri', riichi }
+      }
+      return { action: 'pass' }
+    })
+    assert.equal(player.ankan.length, 1, '暗杠成立')
+    assert.equal(player.ankan[0].length, 4)
+    assert.equal(player.tiles.length, 11, '杠掉 4 张 + 补 1 张岭上牌')
+    assert.equal(mahjong.round.rinshan, true, '刚摸的是岭上牌')
+    assert.equal(player.riichi?.iipatsu, false, '槓会破一发')
+    assert.deepEqual(player.waits, [{ suit: 'so', rank: 3 }], '杠前杠后都是単騎 3s')
+  })
 })
 
 describe('三槓子 / 四槓子 / 岭上开花', () => {
