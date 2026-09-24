@@ -59,7 +59,14 @@ export interface Action {
 
 export class Round {
   kanCount: number = 0
+  // 正在"预备"的暗杠/加杠（等抢杠窗口走完才算成立，见 establishKan）
+  private pendingKan: { type: 'ankan' | 'chakan', playerId: PlayerId, tiles: Tile[] } | null = null
+  // 活牌山（摸牌顺序）。王牌不在这里，见 wanpai
   haiyama: Tile[]
+  // 王牌（末尾 14 张，不会摸到，只用来当岭上牌和宝牌指示牌）。
+  // 从牌尾数每两张一幢：第 1・2 幢（下标 13〜10）是岭上牌，
+  // 第 3 幢上段（[9]）是本宝牌指示牌，第 4〜7 幢上段（[7][5][3][1]）是杠宝牌指示牌，下段是各自的里宝牌
+  wanpai: Tile[]
 
   // 四家（下标就是玩家编号）
   players: Player[]
@@ -78,24 +85,37 @@ export class Round {
   // true -> 四风连打
   sufurenda: TileKind | boolean = null
 
+  // 规则开关。这里是直接 new Round 时的默认值（按 M.League）；走 Mahjong 的话由选项覆盖（见 MahjongOptions）
+  // 食断：副露也认断幺九（M.League 第9章：断么九 不是门前役）
+  kuidashiTanyao = true
+  // 切上满贯：4 番 30 符 / 3 番 60 符 按满贯算（M.League 第6章第6条）
+  kiriageMangan = true
+  // 双倍役满：四暗刻単骑 / 国士无双十三面 / 纯正九莲宝灯 / 大四喜（M.League 没有，都算单倍）
+  doubleYakuman = false
+  // 数え役满：false = 13 番以上（非役满）按三倍满封顶（M.League 第6章第6条）
+  kazoeYakuman = false
+  // 途中流局（九種九牌 / 四風連打 / 四家立直 / 四槓散了）：M.League 第3章第2条「途中流局はない」
+  abortiveDraws = false
+  // 立直要求牌山还剩 ≥4 张：M.League 第4章第8条只禁止"摸到海底牌后立直"，所以默认 false
+  riichiNeedsFourTiles = false
+  // 国士无双抢暗杠：M.League 第4章第5条「いかなる場合でも、暗槓の搶槓は成立しない」，所以默认 false
+  kokushiAnkanChankan = false
+
   constructor (
     // 场风
     public bakaze: Kaze,
     public dealer: PlayerId,
     tiles?: Tile[],
+    // 赤牌枚数：0 = 无赤牌，3 = 万/索/筒各一张（默认），4 = 再加一张赤 5m
+    redFives: 0 | 3 | 4 = 3,
   ) {
     if (!tiles) {
       tiles = []
       for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
         for (let i = 0; i < 9; i++) {
-          if (i + 1 === 5) {
-            tiles.push(new Tile(suit, i + 1, true))
-          } else {
-            tiles.push(new Tile(suit, i + 1, false))
-          }
-          for (let j = 0; j < 3; j++) {
-            tiles.push(new Tile(suit, i + 1, false))
-          }
+          const red = i + 1 !== 5 ? 0 : suit === 'man' && redFives === 4 ? 2 : redFives === 0 ? 0 : 1
+          for (let j = 0; j < red; j++) tiles.push(new Tile(suit, i + 1, true))
+          for (let j = 0; j < 4 - red; j++) tiles.push(new Tile(suit, i + 1, false))
         }
       }
       for (let i = 0; i < 4; i++) {
@@ -117,6 +137,8 @@ export class Round {
       return tiles
     }
     this.players = playerIds.map(id => new Player(this, id, setPlayerId(tiles.splice(0, 13), id)))
+    // 末尾 14 张是王牌（岭上牌 + 宝牌指示牌），先切出来单独放
+    this.wanpai = tiles.splice(-14)
     this.haiyama = tiles
     this.mopai(true, this.dealer)
     // 配牌就听牌的人也要能荣和第一张弃牌，所以非庄家的听牌张先算出来。
@@ -138,23 +160,14 @@ export class Round {
   }
 
   get rest() {
-    return this.haiyama.length - 14
+    return this.haiyama.length
   }
 
   // 宝牌、里宝牌指示牌
   get dorahyoji(): [Tile[], Tile[]] {
-    // 王牌
-    const wanpai = this.haiyama.slice(this.haiyama.length - 14)
-    for (let i = 0; i < 4 - this.kanCount; i++) wanpai.pop()
-    const dora: Tile[] = []
-    const uradora: Tile[] = []
-    for (let i = wanpai.length - 1; i > 0; i--) {
-      if ((14 - i) % 2 !== 0) {
-        dora.push(wanpai[i])
-      } else {
-        uradora.push(wanpai[i])
-      }
-    }
+    // M.League 第2章第6条：本宝牌指示牌在王牌第 3 幢上段，一个杠翻第 4 幢、四个杠翻到第 7 幢
+    const dora = [9, 7, 5, 3, 1].map(index => this.wanpai[index])
+    const uradora = [8, 6, 4, 2, 0].map(index => this.wanpai[index])
     // 开局的宝牌/里宝牌各 1 张，每杠多翻 1 张
     const revealed = 1 + this.kanCount
     return [dora.slice(0, revealed), uradora.slice(0, revealed)]
@@ -163,7 +176,8 @@ export class Round {
   // 如果没有提供 id，则轮到下家并摸牌
   mopai(keepTurn?: boolean, id?: PlayerId, isRinshan?: boolean) {
     id ??= nextId(this.currentId)
-    const tile = this.haiyama.shift()
+    // 岭上牌从王牌最尾幢上段起按顺序取（M.League 第2章第5条），所以从 wanpai 末尾拿
+    const tile = isRinshan ? this.wanpai.pop() : this.haiyama.shift()
     tile.playerId = id
     this.players[id].tiles.push(tile)
     // 摸牌后上一张打出的牌就作废了（否则杠后补牌会被当成"刚打过牌"）
@@ -315,18 +329,16 @@ export class Round {
     this.removeRyuukyokuMangan(discarder)
   }
 
+  // 暗杠与加杠都先"预备"，等一圈没人抢杠才算成立（establishKan），所以这里不加杠计数、
+  // 不翻杠宝牌、也不破坏一発 —— M.League 第4章第5条「搶槓により槓が成立しない時、槓ドラは表示されない」
   // 暗杠与加杠的摸牌在 Mahjong 类里，因为如果被荣和则杠不成立
   ankan(tiles: Tile[]) {
     tiles = [...tiles]
     for (const tile of tiles) {
-      const index = this.player.tiles.indexOf(tile)
-      if (index === -1) throw new MahjongError('tile-not-in-hand', '暗杠: 这张牌不在手牌里')
-      this.player.tiles.splice(index, 1)
+      if (!this.player.tiles.includes(tile)) throw new MahjongError('tile-not-in-hand', '暗杠: 这张牌不在手牌里')
     }
-    this.player.ankan.push(tiles)
     this.kiru = tiles[0]
-    this.kanCount++
-    this.breakFirstTurnFlags()
+    this.pendingKan = { type: 'ankan', playerId: this.currentId, tiles }
   }
 
   chakan(tile: Tile) {
@@ -334,10 +346,27 @@ export class Round {
     if (!pon) throw new MahjongError('not-candidate', '加杠: 这张牌没有对应的碰')
     if (!this.player.tiles.includes(tile)) throw new MahjongError('tile-not-in-hand', '加杠: 这张牌不在手牌里')
     if (pon.chakan) throw new MahjongError('not-candidate', '加杠: 这组碰已经加杠过了')
-    this.player.tiles.splice(this.player.tiles.indexOf(tile), 1)
-    pon.tiles.push(tile)
-    pon.chakan = true
     this.kiru = tile
+    this.pendingKan = { type: 'chakan', playerId: this.currentId, tiles: [tile] }
+  }
+
+  // 没人抢杠 → 这一杠就此成立：这时候才动牌、加杠计数、翻杠宝牌、破一発
+  establishKan() {
+    const kan = this.pendingKan
+    this.pendingKan = null
+    if (!kan) return
+    const player = this.players[kan.playerId]
+    if (kan.type === 'ankan') {
+      for (const tile of kan.tiles) player.tiles.splice(player.tiles.indexOf(tile), 1)
+      player.ankan.push(kan.tiles)
+    } else {
+      const [tile] = kan.tiles
+      player.tiles.splice(player.tiles.indexOf(tile), 1)
+      const pon = player.pon.find(pon => pon.tiles[0].equals(tile))
+      if (!pon) throw new MahjongError('unreachable', '加杠: 找不到对应的碰')
+      pon.tiles.push(tile)
+      pon.chakan = true
+    }
     this.kanCount++
     this.breakFirstTurnFlags()
   }
@@ -371,7 +400,8 @@ export class Round {
     if (beforeDiscard) {
       if (id !== this.currentId) return null
       const action: Action = { types: new Set() }
-      if (this.firstTurnIntact) {
+      // 九種九牌是途中流局，M.League 没有（abortiveDraws 关掉时不给这个选项）
+      if (this.firstTurnIntact && this.abortiveDraws) {
         const counts = group(this.players[id].tiles)
         const yaochu = [
           counts['man'][0], counts['man'][8],
@@ -425,7 +455,9 @@ export class Round {
       if (justDrew) {
         // 现算"打哪张能听牌"：用来判立直，以及看这一手有没有和牌张（自摸）
         const tenpaiDiscards = this.player.tenpaiDiscards()
-        if (!this.player.riichi && this.player.naki === 0 && this.rest >= 4 && tenpaiDiscards.length !== 0) {
+        // 立直的牌山条件：默认按 M.League（只要不是刚摸到海底牌就能立），打开开关则要剩 ≥4 张
+        const wallOk = this.riichiNeedsFourTiles ? this.rest >= 4 : this.rest !== 0
+        if (!this.player.riichi && this.player.naki === 0 && wallOk && tenpaiDiscards.length !== 0) {
           action.types.add('riichi')
         }
         for (const option of tenpaiDiscards) {
@@ -453,8 +485,9 @@ export class Round {
         const hora = yaku(this, this.players[id], this.kiru, false, isChankan)
         if (canHora(hora.yaku) && !this.players[id].furiten && !this.players[id].dojunfuriten) {
           if (isChankan) {
-            // 抢杠和国士无双抢暗杠
-            if (!isAnkanChankan || (isAnkanChankan && (hora.yaku.kokushiMusou || hora.yaku.kokushiMusou13))) {
+            // 抢杠（加杠）。暗杠原则上谁都不能抢，只有开了 kokushiAnkanChankan 才放行国士无双
+            const kokushi = !!hora.yaku.kokushiMusou || !!hora.yaku.kokushiMusou13
+            if (!isAnkanChankan || (this.kokushiAnkanChankan && kokushi)) {
               action.hora = hora
               action.types.add('ron')
             }

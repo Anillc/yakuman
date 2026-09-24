@@ -1,6 +1,6 @@
-import { Action, ActionType, Kan, Kaze, Player, PlayerId, Round, Tile, playerIds } from './round.js'
+import { Action, ActionType, Kan, Kaze, PaoYaku, Player, PlayerId, Round, Tile, playerIds } from './round.js'
 import { MahjongError, TileKind, nextId, shimocha } from './utils.js'
-import { HoraResult } from './yaku.js'
+import { HoraResult, basicPoints } from './yaku.js'
 
 export * from './round.js'
 export * from './tenpai.js'
@@ -10,7 +10,7 @@ export * from './yaku.js'
 // 规则补充（调用方会碰到的）：
 // - 食い替え禁止：刚鸣的那张（吃的话还有同筋的另一端）不能马上打，挂在 ctx.kuikae 上
 // - 吃、碰之后这一巡不能杠（所以要先把 ctx.types 里的 kan 当成"摸牌后才可能有"）
-// - 包（責任払い）默认关，见 MahjongOptions.pao
+// - 包（責任払い）默认开（M.League 第8章第1条），见 MahjongOptions.pao
 //
 // 牌局由调用方"拉"着走：
 //
@@ -91,6 +91,7 @@ export type RyuukyokuType = 'hoapai' | 'kyuushu' | 'suuchaRiichi' | 'sufurenda' 
 export class MahjongEnd {
   type: 'hora' | 'ryuukyoku'
   // 和牌者（可多家）：和牌结果（役与基本点）加上这一家实际收/付的点数
+  // pao = 包（責任払い）时喂牌的责任者；责任只承担被鸣确定的那手役满，其余照常结算
   hora?: ({ type: 'tsumo' | 'ron', id: PlayerId, score: number, pao?: PlayerId } & HoraResult)[]
   ryuukyoku?: {
     type: RyuukyokuType
@@ -117,14 +118,43 @@ export type Decision =
   | { action: 'pass' }
 
 export interface MahjongOptions {
-  // 可选：自定义牌山生成（庄家座位、第几局、本场棒），用于测试或复盘
+  // 可选：自定义牌山生成（庄家座位、第几局、本场棒），用于测试或复盘。
+  // 返回 136 张、按摸牌顺序排：前 52 张当配牌、末尾 14 张当王牌（岭上牌 + 宝牌指示牌）
   createTiles?: (dealerId: PlayerId, kyoku: number, homba: number) => Tile[]
-  // 可选：多家荣和。false（默认）= 頭ハネ，只有离放铳者最近的那家和；true = 每家和牌者都收
+  // 可选：多家荣和。false（默认，M.League 第5章第1条：一局只能有一家和，頭ハネ）= 只有离放铳者最近的那家和；
+  // true = 每家和牌者都收
   multipleRon?: boolean
-  // 可选：包（責任払い）。false（默认）= 不包，和了按普通算；
-  // true = 大三元 / 大四喜 / 四槓子 被鸣确定后和了这手役满，点数全由责任者一个人付
-  // （荣和时放铳者不付，自摸时三家该付的都归责任者；MahjongEnd.hora[].pao 里记着是谁）
+  // 可选：包（責任払い）。true（默认，M.League 第8章第1条）= 包生效，对象是大三元 / 大四喜 / 四槓子。
+  // 责任只承担被鸣确定的那手役满：自摸时那手役满三家该付的全由责任者出（責任払い），
+  // 别家放铳时责任者与放铳者各出一半（折半払い）——双倍役满以上时被鸣确定的那手役满仍是这个算法，
+  // 其余役满部分按普通和牌结算（含本场棒由鸣牌者负担）。
+  // false = 不包，和了按普通算。责任者是谁仍然记在 MahjongEnd.hora[].pao 里
   pao?: boolean
+  // —— 规则开关（不传就用这里的默认值；默认按 M.League 官方规则，条文出处见注释）——
+  // 赤牌枚数：0 = 无赤牌，3（默认，第1章第2条「5萬・5筒・5索の各1枚」），4 = 再加一张赤 5m
+  redFives?: 0 | 3 | 4
+  // 食断：true（默认，第9章把断么九列为非门前役）= 副露也认断幺九；false = 只有门清才认
+  kuidashiTanyao?: boolean
+  // 切上满贯：true（默认，第6章第6条满贯含「30符6翻」「60符5翻」，含场ゾロ即 4 番 30 符 / 3 番 60 符）
+  // false = 这两种按 7700（亲 11600）算
+  kiriageMangan?: boolean
+  // 流局满贯（流し満貫）：false（默认，规则条文里没有这一条）= 不成立，按普通荒牌流局结算；true = 有
+  nagashiMangan?: boolean
+  // 双倍役满：false（默认，第9章役满表没有单列这几种）= 四暗刻单骑 / 国士13面 / 纯正九莲 / 大四喜 按 13 番；
+  // true = 按 26 番
+  doubleYakuman?: boolean
+  // 途中流局（九種九牌 / 四風連打 / 四家立直 / 四槓散了）：false（默认，第3章第2条「途中流局はない」）= 不发生
+  abortiveDraws?: boolean
+  // 被飞：false（默认，第3章第2条「持ち点が無くなった場合でも最終局が終了するまで続行」）
+  bustEndsGame?: boolean
+  // 数え役满：false（默认，第6章第6条「役満以外の役が複合したアガリ点は三倍満まで」）；true = 13 番以上按役满
+  kazoeYakuman?: boolean
+  // 0 张可抽的听牌（听牌张都被自己的手牌/副露吃掉）：false（默认，第3章第11条「認められない」）
+  zeroWaitTenpai?: boolean
+  // 立直要求牌山还剩 ≥4 张：false（默认，第4章第8条只禁止「摸到海底牌之后立直」）；true = 另一些规则的 4 张限制
+  riichiNeedsFourTiles?: boolean
+  // 国士无双抢暗杠：false（默认，第4章第5条「いかなる場合でも、暗槓の搶槓は成立しない」）；true = 认这条本地规则
+  kokushiAnkanChankan?: boolean
 }
 
 export class Mahjong {
@@ -139,7 +169,19 @@ export class Mahjong {
   riichibo = 0
   lastEnd: MahjongEnd
   multipleRon = false
-  pao = false
+  pao = true
+  // 规则开关（默认值见 MahjongOptions 的注释；给空就是这里的默认）
+  redFives: 0 | 3 | 4 = 3
+  kuidashiTanyao = true
+  kiriageMangan = true
+  nagashiMangan = false
+  doubleYakuman = false
+  abortiveDraws = false
+  bustEndsGame = false
+  kazoeYakuman = false
+  zeroWaitTenpai = false
+  riichiNeedsFourTiles = false
+  kokushiAnkanChankan = false
 
   // 下一个要交给调用方的 step（一个询问，或一次局终）
   private pending: Step | null = null
@@ -149,6 +191,17 @@ export class Mahjong {
     this.createTiles = options?.createTiles
     if (options?.multipleRon !== undefined) this.multipleRon = options.multipleRon
     if (options?.pao !== undefined) this.pao = options.pao
+    if (options?.redFives !== undefined) this.redFives = options.redFives
+    if (options?.kuidashiTanyao !== undefined) this.kuidashiTanyao = options.kuidashiTanyao
+    if (options?.kiriageMangan !== undefined) this.kiriageMangan = options.kiriageMangan
+    if (options?.nagashiMangan !== undefined) this.nagashiMangan = options.nagashiMangan
+    if (options?.doubleYakuman !== undefined) this.doubleYakuman = options.doubleYakuman
+    if (options?.abortiveDraws !== undefined) this.abortiveDraws = options.abortiveDraws
+    if (options?.bustEndsGame !== undefined) this.bustEndsGame = options.bustEndsGame
+    if (options?.kazoeYakuman !== undefined) this.kazoeYakuman = options.kazoeYakuman
+    if (options?.zeroWaitTenpai !== undefined) this.zeroWaitTenpai = options.zeroWaitTenpai
+    if (options?.riichiNeedsFourTiles !== undefined) this.riichiNeedsFourTiles = options.riichiNeedsFourTiles
+    if (options?.kokushiAnkanChankan !== undefined) this.kokushiAnkanChankan = options.kokushiAnkanChankan
     // 起家是 0 号，之后由 nextRound() 轮转
     this.createRound(0)
     this.next()
@@ -273,6 +326,8 @@ export class Mahjong {
   // 全都没要（不吃碰杠和）：能和却不和的记见逃（同巡振听），然后继续摸牌；
   // drawer 非空表示刚才问的是抢杠，没人抢就由开杠的那家补一张岭上牌。
   private passAll(ctxs: MahjongContext[], drawer?: PlayerId) {
+    // 没人抢杠 → 这一杠成立（成立之后才翻杠宝牌、才破一発、才判四槓散了）
+    if (drawer !== undefined) this.round.establishKan()
     if (!this.checkKan()) return
     for (const ctx of ctxs) {
       if (ctx.types.has('ron')) this.round.minogashi(ctx.player.id)
@@ -299,14 +354,19 @@ export class Mahjong {
     }
   }
 
-  // 包（責任払い）：这一手和了被包的对象役满时，返回要全额付款的责任者。
-  // 关掉包（默认）就永远返回 null，按普通和牌算（责任者是谁仍然记在 player.pao 里）
-  private paoOf(ctx: MahjongContext): PlayerId | null {
+  // 包（責任払い）：这一手和了被包的对象役满时，返回被确定的那个役满和喂牌的责任者。
+  // 关掉包就永远返回 null，按普通和牌算（责任者是谁仍然记在 player.pao 里）
+  private paoOf(ctx: MahjongContext): { yaku: PaoYaku, playerId: PlayerId } | null {
     if (!this.pao) return null
     const hora = ctx.hora
     if (!hora) return null
-    const entry = ctx.player.pao.find(entry => hora.yaku[entry.yaku])
-    return entry ? entry.playerId : null
+    return ctx.player.pao.find(entry => hora.yaku[entry.yaku]) ?? null
+  }
+
+  // 被包的那手役满单独值多少基本点（开双倍役满时大四喜算 2 倍役满）。
+  // 和牌点是役满之和，所以剩余部分 = hora.points - 这个值
+  private paoBasicPoints(ctx: MahjongContext, pao: PaoYaku) {
+    return basicPoints(ctx.hora!.yaku[pao]!, ctx.hora!.yaku.fu)
   }
 
   // 手切：只能打手牌里原有的牌（不收牌值，必须传手牌里那张 Tile 对象，
@@ -336,9 +396,10 @@ export class Mahjong {
     }
     this.round.dahai(tile, riichi)
     // 打完之后问其余三家要不要吃碰杠和，并顺带判定四家立直 / 四风连打
-    if (riichi && this.round.players.every(player => player.riichi)) {
+    // 途中流局（四家立直 / 四風連打）只在 abortiveDraws 打开时成立（M.League 没有途中流局）
+    if (this.abortiveDraws && riichi && this.round.players.every(player => player.riichi)) {
       this.end({ type: 'ryuukyoku', ryuukyoku: { type: 'suuchaRiichi' } })
-    } else if (this.round.sufurenda === true) {
+    } else if (this.abortiveDraws && this.round.sufurenda === true) {
       this.end({ type: 'ryuukyoku', ryuukyoku: { type: 'sufurenda' } })
     } else {
       this.naki()
@@ -370,7 +431,8 @@ export class Mahjong {
   }
 
   // 杠：传 ctx.kans 里的那一项，type 决定是明杠、暗杠还是加杠
-  // - 暗杠、加杠先问一圈有没有人抢杠（国士无双可抢暗杠），没人抢才补牌
+  // - 暗杠、加杠先问一圈有没有人抢杠（默认只有加杠能被抢；国士抢暗杠要开 kokushiAnkanChankan），
+  //   没人抢的话由 Round.establishKan() 把这一杠坐实，再补岭上牌
   private kan(ctx: MahjongContext, kan: Kan) {
     if (!ctx.types.has('kan')) throw new MahjongError('action-not-allowed', `${this.what(kan)}: 现在不能杠`)
     this.candidate(ctx.kans, kan, this.what(kan))
@@ -416,11 +478,25 @@ export class Mahjong {
     for (const ctx of ctxs) {
       const oya = ctx.player.isDealer
       const hora = ctx.hora!
-      let score = Math.ceil((oya ? 6 * hora.points : 4 * hora.points) / 100) * 100
-      // 包（責任払い）：被包的那手役满和了时，点数全由责任者付（放铳者不付）
+      // 荣和时一家该付多少：庄家 6a、闲家 4a，向上取整到百点
+      const ronPay = (points: number) => Math.ceil((oya ? 6 : 4) * points / 100) * 100
+      // 包（責任払い）：责任者只承担被鸣确定的那手役满，其余（双倍役满以上时的其它役满）
+      // 按普通荣和算，全由放铳者出
       const pao = this.paoOf(ctx)
-      const payer = pao ?? furikomi
-      this.score[payer] -= score
+      const payer = pao?.playerId ?? furikomi
+      // 被包的那手役满单独值多少（没有包时是 0，整手都算「其余部分」）
+      const paoPart = pao === null ? 0 : ronPay(this.paoBasicPoints(ctx, pao.yaku))
+      const restPart = ronPay(hora.points) - paoPart
+      let score = ronPay(hora.points)
+      if (pao === null || pao.playerId === furikomi) {
+        // 鸣牌的人自己放铳：全付
+        this.score[payer] -= score
+      } else {
+        // 包 + 别家放铳 → 被鸣确定的那手役满折半（M.League 第8章第1条「別の放銃者がいたら折半払い」）
+        const half = Math.ceil(paoPart / 2 / 100) * 100
+        this.score[pao.playerId] -= half
+        this.score[furikomi] -= (paoPart - half) + restPart
+      }
       if (closestWinner === ctx.player.id) {
         // 本场棒由放铳者（被包时就是责任者）出，和自摸一样每家 100 点
         const homba = this.homba * 300
@@ -438,7 +514,7 @@ export class Mahjong {
         type: 'ron',
         id: ctx.player.id,
         score,
-        ...pao !== null ? { pao } : {},
+        ...pao !== null ? { pao: pao.playerId } : {},
       })
       this.score[ctx.player.id] += score
     }
@@ -452,11 +528,14 @@ export class Mahjong {
     if (!ctx.types.has('tsumo')) throw new MahjongError('action-not-allowed', '自摸: 现在不能自摸')
     const hora = ctx.hora!
     const oya = ctx.player.isDealer
-    // 每家支付额各自向上取整到百点：庄家 2a、闲家 a；庄家自摸时三家都付 2a
-    const dealerPay = Math.ceil(2 * hora.points / 100) * 100
-    const nonDealerPay = Math.ceil(hora.points / 100) * 100
-    // 包（責任払い）：被包的那手役满自摸时，三家该付的都由责任者一个人付
+    // 自摸时一家该付多少：庄家 2a、闲家 a；庄家自摸时三家都付 2a；各自向上取整到百点
+    const tsumoPay = (points: number, id: PlayerId) =>
+      Math.ceil((oya || this.round.players[id].isDealer ? 2 : 1) * points / 100) * 100
+    // 包（責任払い）：责任者一个人出被鸣确定的那手役满（自摸＝責任払い），
+    // 其余（双倍役满以上时的其它役满）按普通自摸分摊，本场棒也由责任者出
     const pao = this.paoOf(ctx)
+    const paoPart = pao === null ? 0 : this.paoBasicPoints(ctx, pao.yaku)
+    const restPart = hora.points - paoPart
     let score = 0
     for (const id of playerIds) {
       if (this.round.players[id].riichi) {
@@ -464,13 +543,17 @@ export class Mahjong {
         this.score[id] -= 1000
       }
       if (id === ctx.player.id) continue
-      const pay = oya || this.round.players[id].isDealer ? dealerPay : nonDealerPay
-      if (pao === null) this.score[id] -= pay + 100 * this.homba
+      // 没包就是整手；有包就只分摊除了被鸣那手役满以外的部分
+      const pay = tsumoPay(pao === null ? hora.points : restPart, id)
+      this.score[id] -= pao === null ? pay + 100 * this.homba : pay
       score += pay
     }
     if (pao !== null) {
-      // 三家本该各付 pay + 本场 100，全由责任者出
-      this.score[pao] -= score + 300 * this.homba
+      // 被鸣确定的那手役满按自摸收多少（三家各付 2a/a），全由责任者出，本场棒也归他
+      const paoPay = playerIds.reduce((acc, id) =>
+        id === ctx.player.id ? acc : acc + tsumoPay(paoPart, id), 0)
+      this.score[pao.playerId] -= paoPay + 300 * this.homba
+      score += paoPay
     }
     // 供托（本场棒 + 桌上立直棒 + 本局立直棒）
     score += this.homba * 300 + (this.riichibo + this.round.players.filter(player => player.riichi).length) * 1000
@@ -482,7 +565,7 @@ export class Mahjong {
         type: 'tsumo',
         id: ctx.player.id,
         score,
-        ...pao !== null ? { pao } : {},
+        ...pao !== null ? { pao: pao.playerId } : {},
       }],
     })
   }
@@ -490,8 +573,13 @@ export class Mahjong {
   // isRinshan 表示这次是杠后的补牌（岭上开花）
   private mopai(keepTurn?: boolean, id?: PlayerId, isRinshan?: boolean) {
     if (this.round.rest === 0) {
-      const tenpaiIds = playerIds.filter(id => this.round.players[id].waits)
-      let mangan = playerIds.filter(id => this.round.players[id].ryuukyokuMangan)
+      // 听牌：0 张可抽的听牌（听牌张都被自己手牌/副露吃掉）按 M.League 第3章第11条不算听牌
+      const tenpaiIds = playerIds.filter(id => {
+        const waits = this.round.players[id].waits
+        return !!waits && (this.zeroWaitTenpai || waits.length !== 0)
+      })
+      // 流局满贯：关掉这个规则时按普通荒牌流局结算（听牌料照付）
+      let mangan = this.nagashiMangan ? playerIds.filter(id => this.round.players[id].ryuukyokuMangan) : []
       // 多家流满和多家和牌共用开关：默认頭ハネ（从亲按顺位找第一家），multipleRon = true 时几家一起结算
       if (mangan.length > 1 && !this.multipleRon) {
         let closest = this.round.dealer
@@ -567,6 +655,8 @@ export class Mahjong {
       ctxs.push(new MahjongContext(this.round.players[id], action))
     }
     if (ctxs.length === 0) {
+      // 没人能抢杠 → 这一杠成立（暗杠/加杠都先"预备"，到这里才真的算一杠）
+      if (isKan) this.round.establishKan()
       if (this.checkKan()) {
         if (isKan) {
           // 杠的补牌（岭上）
@@ -597,15 +687,19 @@ export class Mahjong {
       this.riichibo = 0
     }
     this.lastEnd = end
+    const canContinue = this.canNextRound()
+    // 半荘以流局收尾时，桌上剩下的立直棒归当时的第一名（第6章第2条）。
+    // 和牌结束时立直棒已经被和牌者收走了（上面 riichibo = 0），这里不会动
+    if (!canContinue) this.payRiichiboToTop()
     // 把局终交给调用方：还能不能继续也一起告诉它（要不要继续 = 要不要再取下一个 step）
-    this.pending = { type: 'roundEnd', end, canContinue: this.canNextRound() }
+    this.pending = { type: 'roundEnd', end, canContinue }
   }
 
   // 整场是否还能再打一局（被飞 / 西入超分 / 南四局结束 → false）。看的是 lastEnd 与当前分数
   private canNextRound(): boolean {
     const end = this.lastEnd
-    // 被飞了
-    if (this.score.some(score => score < 0)) {
+    // 被飞（M.League 没有这条：点数到负也继续打到最终局）
+    if (this.bustEndsGame && this.score.some(score => score < 0)) {
       return false
     }
     // 西入后只要有人分数超过 30000 则结束
@@ -648,10 +742,11 @@ export class Mahjong {
     // 这一局的庄家（createRound 会把 round 换掉，先记下来）
     const dealer = this.round.dealer
     const oyaRepeats = this.oyaRepeats()
-    // 本场：连庄（亲和了 / 亲听牌流局 / 中途流局）累积 +1；轮庄（亲换人）归 0。
-    // 桌上的 100 点棒只是亲摆的计数标记，轮庄时由亲收回，和了者不收它 —— 和了时另外收的
-    // 300/本 是付点方出的（自摸三家分摊、荣和放铳者出），立直棒才是真的供託
-    if (oyaRepeats) this.homba++
+    // 积木场（本场）：M.League 第3章第13条「連荘および親がノーテンで流局した際は積み場とし、
+    // 以後回数と共に増やしていく」「子のアガリを以って積み棒は消滅する」
+    // → 连荘（亲和了 / 亲听牌流局）和荒牌流局都 +1（亲不聴轮庄了也 +1），子和了归 0。
+    // 桌上不摆 100 点棒、只用计数器（同条）；和了时按 300/本 加算、由付点方出（第6章第5条的例子）
+    if (oyaRepeats || this.lastEnd.type === 'ryuukyoku') this.homba++
     else this.homba = 0
     if (oyaRepeats) {
       this.createRound(dealer)
@@ -667,10 +762,33 @@ export class Mahjong {
     return true
   }
 
+  // 半荘结束（流局结尾）时把桌上的立直棒给第一名；同分就分（第6章第2条）：
+  // 两人同分均分，三人按 4:3:3（1000点→400/300/300，2000点→800/600/600），四人再均分。
+  // 名次相同的时候离起家（0 号）近的排前面。和牌结束时 riichibo 已经是 0，所以这里不动
+  private payRiichiboToTop() {
+    if (this.riichibo === 0) return
+    const pot = this.riichibo * 1000
+    this.riichibo = 0
+    const best = Math.max(...this.score)
+    const tops = playerIds.filter(id => this.score[id] === best)
+      .sort((a, b) => ((a - playerIds[0] + 4) % 4) - ((b - playerIds[0] + 4) % 4))
+    if (tops.length === 1) this.score[tops[0]] += pot
+    else if (tops.length === 2) {
+      this.score[tops[0]] += pot / 2
+      this.score[tops[1]] += pot / 2
+    } else if (tops.length === 3) {
+      this.score[tops[0]] += pot * 0.4
+      this.score[tops[1]] += pot * 0.3
+      this.score[tops[2]] += pot * 0.3
+    } else {
+      for (const id of tops) this.score[id] += pot / tops.length
+    }
+  }
+
   // 检查四杠散了：四家合计四杠、且不是某一家独占四杠时流局。
   // 返回 true 表示没有流局（可以继续摸牌）
   private checkKan(): boolean {
-    if (this.round.kanCount === 4) {
+    if (this.abortiveDraws && this.round.kanCount === 4) {
       // 如果某一家自己有四杠，那就不流局
       const ryuukyoku = !playerIds.some(id => {
         const player = this.round.players[id]
@@ -691,6 +809,14 @@ export class Mahjong {
   }
   
   private createRound(dealer: PlayerId) {
-    this.round = new Round(this.bakaze, dealer, this.createTiles?.(dealer, this.kyoku, this.homba))
+    this.round = new Round(this.bakaze, dealer, this.createTiles?.(dealer, this.kyoku, this.homba), this.redFives)
+    // 其余规则开关挂在 Round 上，和了判定 / 流局结算时读
+    this.round.kuidashiTanyao = this.kuidashiTanyao
+    this.round.kiriageMangan = this.kiriageMangan
+    this.round.doubleYakuman = this.doubleYakuman
+    this.round.kazoeYakuman = this.kazoeYakuman
+    this.round.abortiveDraws = this.abortiveDraws
+    this.round.riichiNeedsFourTiles = this.riichiNeedsFourTiles
+    this.round.kokushiAnkanChankan = this.kokushiAnkanChankan
   }
 }

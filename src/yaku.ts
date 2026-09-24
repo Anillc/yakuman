@@ -91,12 +91,12 @@ export interface Yaku {
 
   // 两倍役满
   // 四暗刻单骑 (门前清)
-  suuankouTanki?: 26
+  suuankouTanki?: 13 | 26
   // 国士无双十三面 (门前清)
-  kokushiMusou13?: 26
+  kokushiMusou13?: 13 | 26
   // 纯正九莲宝灯 (门前清)
-  junseiChuurenPoutou?: 26
-  daisuushii?: 26
+  junseiChuurenPoutou?: 13 | 26
+  daisuushii?: 13 | 26
 }
 
 export const yakuman = ['tenhou', 'chiihou', 'daisangen', 'suuankou', 'tsuuiisou', 'ryuuiisou', 'chinroutou', 'kokushiMusou', 'shousuushii', 'suukantsu', 'chuurenPoutou']
@@ -135,9 +135,13 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
   // 门清荣和才有 10 符加成
   if (!isTsumo && player.naki === 0) {
     yaku.fu += 10
-  } else if (isTsumo && player.naki === 0) {
-    yaku.tsumo = 1
+  }
+  // 自摸符 2 符：除了平和自摸（那 2 符下面算到平和时再扣掉）都要给，副露手也一样（第6章第3条）
+  if (isTsumo) {
     yaku.fu += 2
+  }
+  if (isTsumo && player.naki === 0) {
+    yaku.tsumo = 1
     if (round.firstTurnIntact) {
       // 天和：庄家第一巡自摸；其余为地和
       if (player.isDealer) {
@@ -176,7 +180,8 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
       break
     }
   }
-  if (isTanyao) {
+  // 食断：关掉时只有门清才认断幺九（副露的断幺九不算役）
+  if (isTanyao && (round.kuidashiTanyao || player.naki === 0)) {
     yaku.tanyao = 1
   }
   if (isChankan) {
@@ -199,7 +204,8 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
   const dorahyoji = round.dorahyoji
   const dora: TileKind[] = dorahyoji[0].map(({ suit, rank }) => {
     if (['man', 'so', 'pin'].includes(suit)) {
-      return { suit, rank: (rank + 1) % 9 }
+      // 9 的下一张是 1（写成 (rank + 1) % 9 的话 8 会算出 0，8 指示牌的宝牌就永远算不出来）
+      return { suit, rank: rank % 9 + 1 }
     } else if (suit === 'kaze') {
       return { suit, rank: rank % 4 + 1 }
     } else {
@@ -215,7 +221,7 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
   if (player.riichi) {
     const uradora: TileKind[] = dorahyoji[1].map(({ suit, rank }) => {
       if (['man', 'so', 'pin'].includes(suit)) {
-        return { suit, rank: (rank + 1) % 9 }
+        return { suit, rank: rank % 9 + 1 }
       } else if (suit === 'kaze') {
         return { suit, rank: rank % 4 + 1 }
       } else {
@@ -327,17 +333,17 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
   if (handType === 'kokushiMusou') {
     yaku.kokushiMusou = 13
     yaku.fu = 25
-    return finalize(yaku)
+    return finalize(yaku, round)
   }
   if (handType === 'kokushiMusou13') {
     yaku.kokushiMusou13 = 26
     yaku.fu = 25
-    return finalize(yaku)
+    return finalize(yaku, round)
   }
   if (handType === 'chiitoitsu') {
     // 七对子形有时也能拆成普通形（例：112233m445566p77m 同时是二盃口），
     // 两个解读都算出来，取基本点高的那个
-    const results: HoraResult[] = [finalize({ ...yaku, fu: 25, chiitoitsu: 2 }, true)]
+    const results: HoraResult[] = [finalize({ ...yaku, fu: 25, chiitoitsu: 2 }, round, true)]
     if (normalShanten(group(handTiles.concat(horaTile)), player.naki + player.ankan.length) === -1) {
       results.push(...normalResults(round, player, yaku, handTiles, horaTile, isTsumo))
     }
@@ -350,7 +356,7 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
     return results.reduce((acc, x) => x.points > acc.points ? x : acc)
   }
   // 不是和牌形（调用方用错）——保持旧行为，只返回已经攒到的役
-  return finalize(yaku)
+  return finalize(yaku, round)
 }
 
 /** 普通形（4 面子 + 1 将）的每种解读各算一遍得分；空数组 = 这个和牌张没有可用的分解 */
@@ -366,7 +372,7 @@ function normalResults(
       normalYaku(round, player, candidate, dec, horaTile, isTsumo)
     }
   }
-  return yakus.map(candidate => finalize(candidate))
+  return yakus.map(candidate => finalize(candidate, round))
 }
 
 function normalYaku(
@@ -561,11 +567,8 @@ function normalYaku(
     result.fu += 2
   } else if (toitsu[0].suit === 'kaze') {
     const kaze = kazes[toitsu[0].tiles[0] - 1]
-    if (kaze === round.bakaze) {
-      yakuhaiPair = true
-      result.fu += 2
-    }
-    if (kaze === player.seatWind) {
+    // 连风牌（场风＋自风）的雀头也只算 2 符（M.League 第6章第3条 表注「連風牌の対子も2符とする」）
+    if (kaze === round.bakaze || kaze === player.seatWind) {
       yakuhaiPair = true
       result.fu += 2
     }
@@ -577,8 +580,8 @@ function normalYaku(
         // 平和自摸不算自摸的两符
         result.fu -= 2
       }
-    } else {
-      // 副露平和底符为 30
+    } else if (!isTsumo) {
+      // 食い平和：荣和时惯例给副底加 10 符（自摸的话就是 20 + 自摸符 2 = 22 → 30 符）
       result.fu += 10
     }
   }
@@ -740,7 +743,7 @@ function normalYaku(
   }
 }
 
-function finalize(result: Yaku, isChiitoitsu?: boolean): HoraResult {
+function finalize(result: Yaku, round: Round, isChiitoitsu?: boolean): HoraResult {
   // 七对子与国士无双按约定的固定 25 符，其余按 10 符进位
   const fixedFu = isChiitoitsu || !!result.kokushiMusou || !!result.kokushiMusou13
   const fu = fixedFu ? result.fu : Math.ceil(result.fu / 10) * 10
@@ -753,23 +756,31 @@ function finalize(result: Yaku, isChiitoitsu?: boolean): HoraResult {
   }
   for (const ykm of doubleyakuman) {
     if (ykm in result) {
-      newYaku[ykm] = 26
-      newYaku.fan += 26
+      // 双倍役满：关掉开关时按单倍（13 番）算
+      const fan = round.doubleYakuman ? 26 : 13
+      newYaku[ykm] = fan
+      newYaku.fan += fan
     }
   }
-  if (newYaku.fan >= 13) return { yaku: newYaku, points: basicPoints(newYaku.fan, fu) }
+  if (newYaku.fan >= 13) return { yaku: newYaku, points: basicPoints(newYaku.fan, fu, round.kiriageMangan) }
   for (const [name, fan] of Object.entries(result)) {
     if (['fu', 'fan'].includes(name)) continue
     newYaku[name] = fan
     newYaku.fan += fan
   }
-  return { yaku: newYaku, points: basicPoints(newYaku.fan, fu) }
+  // 数え役满：关掉时（M.League 第6章第6条）13 番以上按三倍满封顶
+  if (!round.kazoeYakuman && newYaku.fan >= 13) {
+    return { yaku: newYaku, points: 6000 }
+  }
+  return { yaku: newYaku, points: basicPoints(newYaku.fan, fu, round.kiriageMangan) }
 }
 
-function basicPoints(fan: number, fu: number) {
+// 基本点：役满按 8000 × 役满倍数算，调用方再乘庄家/闲家倍数
+export function basicPoints(fan: number, fu: number, kiriageMangan = false) {
   if (fan <= 4) {
     const points = fu * (2 ** (fan + 2))
-    return points >= 2000 ? 2000 : points
+    // 切上满贯：1920（4 番 30 符 / 3 番 60 符）也当满贯封顶
+    return points >= (kiriageMangan ? 1920 : 2000) ? 2000 : points
   }
   switch (fan) {
     case 5:
