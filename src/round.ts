@@ -2,7 +2,7 @@
 // M.League 公式戦ルール：https://m-league.jp/about （页面里的 rule 段，第1〜9章）
 // 规则开关与整套规则档见 profile.ts
 import { shanten, waits } from './tenpai.js'
-import { MahjongError, TileKind, compareTileKind, createEmptyCounts, group, nextId, shimocha, shuffle, toMPSZ, toTileKinds, uniqTileKinds } from './utils.js'
+import { MahjongError, TileKind, compareTileKind, createEmptyCounts, group, nextId, shuffle, toMPSZ, toTileKinds, uniqTileKinds } from './utils.js'
 import { HoraResult, canHora, yaku } from './yaku.js'
 import { RuleProfile, defaultProfile } from './profile.js'
 
@@ -474,8 +474,8 @@ export class Round {
       if (id === this.currentId) return null
       const action: Action = { types: new Set() }
       const waits = this.players[id].waits
-      let tileKind: TileKind | undefined
-      if (waits && (tileKind = waits.find(wait => this.discarded.equals(wait)))) {
+      // 这张弃牌正好是这一家能和的牌 → 再看有没有役、有没有振听
+      if (waits?.some(wait => this.discarded.equals(wait))) {
         const hora = yaku(this, this.players[id], this.discarded, false, isChankan)
         if (canHora(hora.yaku) && !this.players[id].furiten && !this.players[id].dojunfuriten) {
           if (isChankan) {

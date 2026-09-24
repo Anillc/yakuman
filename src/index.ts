@@ -4,7 +4,7 @@
 import { Action, ActionType, Kan, Kaze, PaoYaku, Player, PlayerId, Round, Tile, playerIds } from './round.js'
 import { MahjongError, TileKind, nextId, shimocha } from './utils.js'
 import { HoraResult, basicPoints } from './yaku.js'
-import { RuleProfile, defaultProfile, mergeProfile } from './profile.js'
+import { RuleProfile, mergeProfile } from './profile.js'
 
 export * from './round.js'
 export * from './tenpai.js'
@@ -473,6 +473,7 @@ export class Mahjong {
         this.score[pao.playerId] -= half
         this.score[furikomi] -= (paoPart - half) + restPart
       }
+      // 场供（本场棒 + 桌上的立直棒）按頭ハネ算：多响时也只有离放铳者最近的那家收
       if (closestWinner === ctx.player.id) {
         // 本场棒由放铳者（被包时就是责任者）出，和自摸一样每家 100 点
         const homba = this.homba * 300
