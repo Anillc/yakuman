@@ -1,0 +1,12 @@
+// 构建专用：只编 src，产物落在 lib/（package.json 的 main/types 指这里）。
+// 类型检查/编辑器用的是 tsconfig.json（包含 src + examples + utils + tests，noEmit）。
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "lib",
+    "declaration": true
+  },
+  "include": ["src"]
+}

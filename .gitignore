@@ -1,7 +1,12 @@
 /node_modules/
 /.yarn/
 /lib/
-/tests/
+
+# 编辑器"编译单个文件"时会往源文件旁边写这些产物（yarn build 不会）
+/tests/*.js
+/tests/*.d.ts
+/utils/*.js
+/utils/*.d.ts
 
 /.direnv
 /result

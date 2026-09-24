@@ -107,7 +107,7 @@ export const doubleyakuman: (keyof Yaku)[] = ['suuankouTanki', 'kokushiMusou13',
 
 type HoraType = 'chiitoitsu' | 'kokushiMusou' | 'kokushiMusou13' | 'normal' | 'invalid'
 
-function horaType(player: Player, tiles: TileKind[]): HoraType {
+function horaType(player: Player, tiles: TileKind[], horaTile: TileKind): HoraType {
   const counts = group(tiles)
   const shanten = normalShanten(counts, player.naki + player.ankan.length)
   const chiitoitsu = chiitoitsuShanten(counts)
@@ -116,11 +116,9 @@ function horaType(player: Player, tiles: TileKind[]): HoraType {
     return 'chiitoitsu'
   }
   if (kokushiMusou[0] === -1) {
-    if (kokushiMusou[1].length !== 1) {
-      return 'kokushiMusou13'
-    } else {
-      return 'kokushiMusou'
-    }
+    // 国士十三面：和牌张自己也是两张（说明和牌前 13 种就齐了）。
+    // 单骑的话和牌张只出现一次
+    return counts[horaTile.suit][horaTile.rank - 1] === 2 ? 'kokushiMusou13' : 'kokushiMusou'
   }
   if (shanten === -1) {
     return 'normal'
@@ -144,7 +142,7 @@ export function yaku(
   const win = typeof horaTileOrTsumo === 'boolean' ? handTiles.pop() : horaTileOrTsumo
   if (!win) throw new MahjongError('unreachable', 'yaku: 手里没有和牌张')
   if (typeof horaTileOrTsumo === 'boolean') isTsumo = horaTileOrTsumo
-  let handType = horaType(player, handTiles.concat(win))
+  let handType = horaType(player, handTiles.concat(win), win)
 
   // 门清荣和才有 10 符加成
   if (!isTsumo && player.naki === 0) {
@@ -389,6 +387,14 @@ function normalResults(
   return yakus.map(candidate => finalize(candidate, round))
 }
 
+// 三色同顺 / 三色同刻：万・索・筒 三种花色里各有一个牌型相同的面子
+function hasSanshoku(mentsu: Block[]) {
+  const numberSuits: Suit[] = ['man', 'so', 'pin']
+  return mentsu.some(block =>
+    numberSuits.includes(block.suit) &&
+    numberSuits.every(suit => mentsu.some(other => other.suit === suit && arrayEquals(other.tiles, block.tiles))))
+}
+
 function normalYaku(
   round: Round, player: Player, result: Yaku,
   decomposition: Decomposed, horaTile: TileKind, isTsumo: boolean,
@@ -617,24 +623,8 @@ function normalYaku(
       result.ryanpeikou = 3
     }
   }
-  const restKotsu = [...kotsu]
-  if (restKotsu.length >= 3) {
-    while (restKotsu.length !== 0) {
-      const block = restKotsu.shift()!
-      let same = 1
-      for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
-        if (block.suit === suit) continue
-        const index = restKotsu.findIndex(kotsu => arrayEquals(block.tiles, kotsu.tiles))
-        if (index !== -1) {
-          restKotsu.splice(index, 1)
-          same++
-        }
-      }
-      if (same === 3) {
-        result.sanshokuDoukou = 2
-        break
-      }
-    }
+  if (hasSanshoku(kotsu)) {
+    result.sanshokuDoukou = 2
   }
   // 槓要用 player.kanCount（含加杠），加杠存在 pon 里不算 ankan/minkan
   if (player.kanCount === 3) {
@@ -723,28 +713,9 @@ function normalYaku(
       break
     }
   }
-  const restShuntsu = [...shuntsu]
-  if (restShuntsu.length >= 3) {
-    while (restShuntsu.length !== 0) {
-      const block = restShuntsu.shift()!
-      let same = 1
-      for (const suit of ['man', 'so', 'pin'] satisfies Suit[]) {
-        if (block.suit === suit) continue
-        const index = restShuntsu.findIndex(shuntsu => arrayEquals(block.tiles, shuntsu.tiles))
-        if (index !== -1) {
-          restShuntsu.splice(index, 1)
-          same++
-        }
-      }
-      if (same === 3) {
-        if (player.naki === 0) {
-          result.sanshokuDoujun = 2
-        } else {
-          result.sanshokuDoujun = 1
-        }
-        break
-      }
-    }
+  if (hasSanshoku(shuntsu)) {
+    // 三色同顺是 ※（副露减一番）：门清 2 番、副露 1 番
+    result.sanshokuDoujun = player.naki === 0 ? 2 : 1
   }
 
   const kazeKotsu = kotsu.filter(kotsu => kotsu.suit === 'kaze')

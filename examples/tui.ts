@@ -1,4 +1,4 @@
-// TUI 试玩 example：和 tests/interactive.ts 用同一套规则，但画成一块牌桌。
+// TUI 试玩 example：用默认的 mLeague 规则档，但画成一块牌桌。
 // 用法（仓库根目录）：
 //   yarn tsx examples/tui.ts --help     看全部参数
 // 按键：←/→ 选牌 · Enter 打出 · m 摸切 · r 立直 · t 自摸 · o 荣和 · 1-9 选候选 · q 跳过 · Q 退出
@@ -12,7 +12,7 @@ import { TileKind, compareTileKind, toMPSZ } from '../src/utils.js'
 const program = new Command()
 program
   .name('tui')
-  .description('日本麻将 TUI example（和 tests/interactive.ts 用同一套规则）')
+  .description('日本麻将 TUI example（默认用 mLeague 规则档，见 src/profile.ts）')
   .option('--seat <seat>', '你操作哪一家：0-3 或 ton/nan/sha/pei', '0')
   .option('--seed <seed>', '牌山种子（固定住就能复现同一局）', '20230514')
   .option('--demo', '四家都交给机器人自动打')

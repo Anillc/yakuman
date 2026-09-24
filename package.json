@@ -18,7 +18,9 @@
   "author": "Anillc <void@anillc.cn>",
   "license": "MIT",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc",
+    "test": "node --import tsx --test tests/*.test.ts",
     "tui": "tsx examples/tui.ts"
   },
   "devDependencies": {

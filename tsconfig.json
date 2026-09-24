@@ -1,15 +1,13 @@
 {
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "lib",
     "target": "ESNext",
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "declaration": true,
     "strict": true,
+    "noEmit": true,
   },
-  "include": ["src"],
+  "include": ["src", "examples", "utils", "tests"],
 }
