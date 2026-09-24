@@ -324,37 +324,49 @@ export function yaku(round: Round, player: Player, horaTile: TileKind, isTsumo: 
   }
 
   // 与牌型相关的役
-  if (handType === 'chiitoitsu') {
-    yaku.chiitoitsu = 2
-    yaku.fu = 25
-  }
   if (handType === 'kokushiMusou') {
     yaku.kokushiMusou = 13
     yaku.fu = 25
+    return finalize(yaku)
   }
   if (handType === 'kokushiMusou13') {
     yaku.kokushiMusou13 = 26
     yaku.fu = 25
+    return finalize(yaku)
+  }
+  if (handType === 'chiitoitsu') {
+    // 七对子形有时也能拆成普通形（例：112233m445566p77m 同时是二盃口），
+    // 两个解读都算出来，取基本点高的那个
+    const results: HoraResult[] = [finalize({ ...yaku, fu: 25, chiitoitsu: 2 }, true)]
+    if (normalShanten(group(handTiles.concat(horaTile)), player.naki + player.ankan.length) === -1) {
+      results.push(...normalResults(round, player, yaku, handTiles, horaTile, isTsumo))
+    }
+    return results.reduce((acc, x) => x.points > acc.points ? x : acc)
   }
   if (handType === 'normal') {
-    const waitDecompositions = waitSplits(group(handTiles))
-
-    const yakus: Yaku[] = []
-    for (const [wait, decs] of waitDecompositions) {
-      if (compareTileKind(horaTile, wait) !== 0) continue
-      for (const dec of decs) {
-        const candidate = { ...yaku }
-        yakus.push(candidate)
-        normalYaku(round, player, candidate, dec, horaTile, isTsumo)
-      }
-    }
-    const results = yakus.map(candidate => finalize(candidate))
+    const results = normalResults(round, player, yaku, handTiles, horaTile, isTsumo)
     if (results.length === 0) throw new MahjongError('unreachable', 'yaku: 这手牌没有可用的分解')
     // 待ち与分解都有多个时取基本点最高的那个
     return results.reduce((acc, x) => x.points > acc.points ? x : acc)
-  } else {
-    return finalize(yaku, handType === 'chiitoitsu')
   }
+  // 不是和牌形（调用方用错）——保持旧行为，只返回已经攒到的役
+  return finalize(yaku)
+}
+
+/** 普通形（4 面子 + 1 将）的每种解读各算一遍得分；空数组 = 这个和牌张没有可用的分解 */
+function normalResults(
+  round: Round, player: Player, base: Yaku, handTiles: TileKind[], horaTile: TileKind, isTsumo: boolean,
+): HoraResult[] {
+  const yakus: Yaku[] = []
+  for (const [wait, decs] of waitSplits(group(handTiles))) {
+    if (compareTileKind(horaTile, wait) !== 0) continue
+    for (const dec of decs) {
+      const candidate = { ...base }
+      yakus.push(candidate)
+      normalYaku(round, player, candidate, dec, horaTile, isTsumo)
+    }
+  }
+  return yakus.map(candidate => finalize(candidate))
 }
 
 function normalYaku(
@@ -515,6 +527,8 @@ function normalYaku(
       suit: kan[0].suit,
       tiles: kan.map(tile => tile.rank),
     })
+    // 暗杠也是暗刻，三暗刻 / 四暗刻 要算上（符单独在下面加）
+    anko++
     if (['man', 'so', 'pin'].includes(kan[0].suit)) {
       if ([1, 9].includes(kan[0].rank)) {
         result.fu += 32
@@ -605,10 +619,11 @@ function normalYaku(
       }
     }
   }
-  if (player.minkan.length + player.ankan.length === 3) {
+  // 槓要用 player.kanCount（含加杠），加杠存在 pon 里不算 ankan/minkan
+  if (player.kanCount === 3) {
     result.sankantsu = 2
   }
-  if (player.minkan.length + player.ankan.length === 4) {
+  if (player.kanCount === 4) {
     result.suukantsu = 13
   }
   if (kotsu.length === 4) {
@@ -649,6 +664,16 @@ function normalYaku(
         }
       } else {
         junchan = false
+      }
+    }
+    // 雀头也要含幺九牌/字牌：雀头是字牌 → 不是纯全带；雀头是中张数牌 → 两个都不是
+    const pair = toitsu[0]
+    if (pair) {
+      const isSuitPair = ['man', 'so', 'pin'].includes(pair.suit)
+      const pairRank = pair.tiles[0]
+      if (!isSuitPair || (pairRank !== 1 && pairRank !== 9)) {
+        junchan = false
+        if (isSuitPair) chanta = false
       }
     }
     if (hasSuitMentsu) {

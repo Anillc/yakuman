@@ -369,14 +369,14 @@ export class Mahjong {
   }
 
   // 杠：传 ctx.kans 里的那一项，type 决定是明杠、暗杠还是加杠
-  // - 明杠补的牌在 Round.minkan 里，所以不用再调 mopai
   // - 暗杠、加杠先问一圈有没有人抢杠（国士无双可抢暗杠），没人抢才补牌
   private kan(ctx: MahjongContext, kan: Kan) {
     if (!ctx.types.has('kan')) throw new MahjongError('action-not-allowed', `${this.what(kan)}: 现在不能杠`)
     this.candidate(ctx.kans, kan, this.what(kan))
     if (kan.type === 'minkan') {
-      this.round.minkan(ctx.player.id, kan.tiles)
-      this.next()
+      // 明杠不会被抢，但可能是第 4 个槓（四槓散了）：先做杠、判流局，没人流局才补岭上
+      this.round.minkan(ctx.player.id, kan.tiles, false)
+      if (this.checkKan()) this.mopai(true, ctx.player.id, true)
     } else if (kan.type === 'ankan') {
       this.round.ankan(kan.tiles)
       this.naki(true, true)
@@ -421,12 +421,16 @@ export class Mahjong {
       const payer = pao ?? furikomi
       this.score[payer] -= score
       if (closestWinner === ctx.player.id) {
-        // 本场的立直棒由放铳者（被包时就是责任者）承担（等价于立直者先付、再收回）
-        const kyotaku = this.homba * 300 + this.round.players.filter(player => player.riichi).length * 1000
-        score += kyotaku
-        this.score[payer] -= kyotaku
+        // 本场棒由放铳者（被包时就是责任者）出，和自摸一样每家 100 点
+        const homba = this.homba * 300
+        score += homba
+        this.score[payer] -= homba
+        // 立直棒由立直者自己出（和 tsumo 一致），和牌者收；放铳者不替别人付
+        for (const player of this.round.players) {
+          if (player.riichi) this.score[player.id] -= 1000
+        }
         // 桌上已有的立直棒是之前流局时从立直者扣过的，直接给和牌者，不再向放铳者收
-        score += this.riichibo * 1000
+        score += (this.riichibo + this.round.players.filter(player => player.riichi).length) * 1000
       }
       horaList.push({
         ...hora,
@@ -651,7 +655,8 @@ export class Mahjong {
       // 如果某一家自己有四杠，那就不流局
       const ryuukyoku = !playerIds.some(id => {
         const player = this.round.players[id]
-        return player.ankan.length + player.minkan.length === 4
+        // 加杠记在 pon 里，必须用 player.kanCount，不然四槓子会被当成四槓散了
+        return player.kanCount === 4
       })
       if (ryuukyoku) {
         this.end({

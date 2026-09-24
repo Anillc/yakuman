@@ -124,7 +124,7 @@ export class Round {
     for (const player of this.players) {
       if (player.id === this.dealer) continue
       const [shanten, waits] = player.calcShantenAndWaits()
-      player.waits = shanten === 0 ? waits : null
+      player.waits = shanten === 0 ? waits : undefined
     }
   }
 
@@ -229,12 +229,14 @@ export class Round {
           this.sufurenda = false
         }
       }
-      // 四风连打：四家都打出同一张风牌（最后一家是 3 号玩家）
-      if (this.sufurenda && this.currentId === 3) {
+      // 四风连打：四家都打出同一张风牌。第一巡按自风 东南西北 出牌，
+      // 所以"最后一家"是北家（北家的编号随庄家轮转，不是固定的 3 号）
+      if (this.sufurenda && this.player.seatWind === 'pei') {
         this.sufurenda = true
       }
     }
     if (this.tenpaiCache) {
+      // 找不到 = 这一打之后不听牌（waits 变成 undefined，判断用真值）
       this.player.waits = this.tenpaiCache.find(option => compareTileKind(option.discard, tile) === 0)?.waits
       if (riichi) {
         if (!this.player.waits || this.player.naki !== 0) {
@@ -247,7 +249,7 @@ export class Round {
         }
       }
     } else {
-      this.player.waits = null
+      this.player.waits = undefined
       if (riichi) throw new MahjongError('unreachable', '立直: 这一手不能立直（应该由调用方先检查）')
     }
     this.tenpaiCache = null
@@ -310,7 +312,8 @@ export class Round {
     this.updateTenpaiCache()
   }
 
-  minkan(id: PlayerId, tiles: Tile[]) {
+  // drawRinshan = false 时只做鸣杠本身，岭上牌由调用方补（要先判四槓散了，见 Mahjong.kan）
+  minkan(id: PlayerId, tiles: Tile[], drawRinshan = true) {
     tiles = [...tiles]
     const player = this.players[id]
     for (const tile of tiles) {
@@ -324,7 +327,7 @@ export class Round {
 
     // 摸牌会把 kiru 清空，先记住放铳者是谁
     const discarder = this.kiru.playerId
-    this.mopai(true, id, true)
+    if (drawRinshan) this.mopai(true, id, true)
     this.kanCount++
     // 包：四つ目の槓が明槓なら、その牌を切った人が責任者
     if (this.kanCount === 4) player.pao.push({ yaku: 'suukantsu', playerId: discarder })
@@ -582,9 +585,9 @@ export class Player {
   discards: Tile[] = []
   riichi: Riichi
 
-  // 听牌张。null = 不听牌；空数组 = 听牌但没有能抽到的和牌张（等的那张自己攥着 4 张）
-  // 判断听牌用 `waits !== null`，不要用长度
-  waits: TileKind[]
+  // 听牌张。undefined（或任何假值）= 不听牌；空数组 = 听牌但没有能抽到的和牌张（等的那张自己攥着 4 张）
+  // 判断听牌用真值 `if (player.waits)`：空数组是真值，所以"听牌但 0 张可抽"也算听牌；不要用长度判断
+  waits?: TileKind[]
 
   // 食い替え：刚吃/碰进来的那张（以及同筋的另一端）不能马上打出去，打完之后清空
   kuikae: TileKind[] = []
@@ -628,15 +631,21 @@ export class Player {
       .map(({ discard, waits }) => ({ discard, waits }))
   }
 
-  // null = 不听牌，返回数组（可能是空的）= 听牌；判断用 `!== null`，别用 length
-  waitsAfterDiscard(tileKind: TileKind): TileKind[] | null {
+  // undefined = 不听牌，返回数组（可能是空的）= 听牌；判断用真值，别用 length
+  waitsAfterDiscard(tileKind: TileKind): TileKind[] | undefined {
     return this.tenpaiDiscards()
-      .find(option => compareTileKind(option.discard, tileKind) === 0)?.waits ?? null
+      .find(option => compareTileKind(option.discard, tileKind) === 0)?.waits
   }
 
   // 鸣牌数量（暗杠不算，算向听/和牌时要另外加 player.ankan.length）
   get naki() {
     return this.chi.length + this.pon.length + this.minkan.length
+  }
+
+  // 这一家自己的槓数（暗杠 / 明杠 / 加杠）。加杠存在 pon 里（chakan = true），
+  // 算三槓子 / 四槓子 / 四槓散了 时必须带上，否则会漏役满、或者把四槓子误判成四槓散了
+  get kanCount() {
+    return this.ankan.length + this.minkan.length + this.pon.filter(pon => pon.chakan).length
   }
 
   // 本局的自风（随庄家轮换）
